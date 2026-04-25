@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>프리미엄 현장 일보</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; }
+        .hidden-view { display: none !important; }
+        ::-webkit-scrollbar { width: 0px; background: transparent; }
+        
+        /* 럭셔리 커스텀 스타일 */
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 10px 40px -10px rgba(0,0,0,0.08);
+            border: 1px solid rgba(228, 228, 231, 0.8);
+        }
+        .gold-gradient-text {
+            background: linear-gradient(to right, #D4AF37, #F3E5AB, #D4AF37);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .gold-gradient-bg {
+            background: linear-gradient(135deg, #B8860B 0%, #D4AF37 50%, #DAA520 100%);
+        }
+        .view-transition {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-zinc-50 pb-28 selection:bg-yellow-200 text-zinc-800">
+
+    <!-- ==================== [1. 현장 작업자 화면 (Front-End)] ==================== -->
+    <div id="workerView" class="view-transition">
+        <!-- 럭셔리 헤더 -->
+        <header class="bg-gradient-to-b from-zinc-900 to-zinc-800 text-white p-6 rounded-b-[2rem] shadow-2xl sticky top-0 z-30 flex justify-between items-center border-b border-zinc-700">
+            <div>
+                <h1 class="text-2xl font-black tracking-tight gold-gradient-text drop-shadow-md">
+                    PREMIUM FIELD LOG
+                </h1>
+                <p id="headerSiteName" class="text-zinc-400 text-xs mt-1 font-medium tracking-widest">덕동골 프로젝트 관리 시스템</p>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="toggleView('settings')" class="bg-zinc-800 hover:bg-zinc-700 w-10 h-10 rounded-full border border-zinc-600 flex items-center justify-center transition-all text-zinc-300">
+                    <i class="fa-solid fa-gear"></i>
+                </button>
+                <button onclick="toggleView('admin')" class="bg-zinc-800 hover:bg-zinc-700 w-10 h-10 rounded-full border border-zinc-600 flex items-center justify-center transition-all shadow-[0_0_15px_rgba(212,175,55,0.15)] text-[#D4AF37]">
+                    <i class="fa-solid fa-chart-pie"></i>
+                </button>
+            </div>
+        </header>
+
+        <main class="p-4 max-w-xl mx-auto mt-2 space-y-6">
+            
+            <!-- (1) 공통 정보 (날짜/사진/작업내용) -->
+            <section class="glass-card rounded-3xl overflow-hidden relative">
+                <div class="absolute top-0 left-0 w-1 h-full gold-gradient-bg"></div>
+                <div class="p-6 space-y-6">
+                    
+                    <!-- 날짜 -->
+                    <div>
+                        <label class="flex items-center text-xs font-bold tracking-widest text-zinc-500 uppercase mb-2">
+                            <i class="fa-regular fa-calendar mr-2 text-[#D4AF37]"></i> Date
+                        </label>
+                        <input type="date" id="logDate" class="w-full bg-zinc-50/50 border border-zinc-200 text-zinc-900 text-lg rounded-2xl focus:ring-[#D4AF37] focus:border-[#D4AF37] block p-4 font-semibold shadow-inner transition-all outline-none" />
+                    </div>
+
+                    <hr class="border-zinc-100">
+
+                    <!-- 현장 사진 -->
+                    <div>
+                        <div class="flex justify-between items-center mb-3">
+                            <label class="flex items-center text-xs font-bold tracking-widest text-zinc-500 uppercase">
+                                <i class="fa-solid fa-camera mr-2 text-[#D4AF37]"></i> Photos
+                            </label>
+                            <span id="photoCount" class="text-[10px] font-bold px-2 py-1 bg-zinc-100 text-zinc-500 rounded-lg border border-zinc-200">0 / 6</span>
+                        </div>
+                        <input type="file" id="photoInput" multiple accept="image/*" class="hidden" onchange="handlePhotoUpload(event)" />
+                        <div id="photoGrid" class="grid grid-cols-3 gap-3">
+                            <!-- JS 렌더링 -->
+                        </div>
+                    </div>
+
+                    <hr class="border-zinc-100">
+
+                    <!-- 작업 내용 (특이사항) -->
+                    <div>
+                        <label class="flex items-center text-xs font-bold tracking-widest text-zinc-500 uppercase mb-2">
+                            <i class="fa-solid fa-pen-nib mr-2 text-[#D4AF37]"></i> Work Details
+                        </label>
+                        <textarea id="logNotes" placeholder="금일 작업의 주요 내용 및 특이사항을 기록합니다." class="w-full bg-zinc-50/50 border border-zinc-200 text-zinc-900 text-sm rounded-2xl focus:ring-[#D4AF37] focus:border-[#D4AF37] block p-4 h-28 resize-none shadow-inner transition-all outline-none"></textarea>
+                    </div>
+
+                </div>
+            </section>
+
+            <!-- (2) 공정 리스트 컨테이너 -->
+            <div id="processesContainer" class="space-y-6">
+                <!-- JS에서 생성 -->
+            </div>
+
+            <!-- (3) 새로운 공정 추가 버튼 -->
+            <button onclick="addProcessBlock()" class="w-full py-4 rounded-3xl border-2 border-dashed border-[#D4AF37] text-[#B8860B] font-bold text-sm bg-[#D4AF37]/5 hover:bg-[#D4AF37]/10 transition-all flex items-center justify-center gap-2">
+                <i class="fa-solid fa-plus-circle text-lg"></i>
+                새로운 공정 추가하기
+            </button>
+
+        </main>
+
+        <!-- 하단 전송 버튼 -->
+        <div class="fixed bottom-0 left-0 right-0 p-5 bg-white/90 backdrop-blur-md border-t border-zinc-200 z-40 max-w-xl mx-auto rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
+            <button id="submitBtn" onclick="submitForm()" class="w-full bg-zinc-900 hover:bg-black text-[#D4AF37] font-bold text-lg py-4 rounded-2xl shadow-xl flex items-center justify-center gap-3 transition-transform active:scale-[0.98]">
+                <i class="fa-solid fa-paper-plane"></i>
+                <span class="tracking-wide">업무일지 최종 결재</span>
+            </button>
+        </div>
+    </div>
+
+
+    <!-- ==================== [2. 관리자 화면 (Back-End DB & Dashboard)] ==================== -->
+    <div id="adminView" class="hidden-view bg-zinc-100 min-h-screen pb-20 view-transition">
+        <header class="bg-zinc-900 text-[#D4AF37] p-6 shadow-xl flex justify-between items-center rounded-b-3xl">
+            <div>
+                <h1 class="text-xl font-bold tracking-tight">EXECUTIVE DASHBOARD</h1>
+                <p class="text-zinc-400 text-[10px] uppercase tracking-widest mt-1">Real-time Data & Analytics</p>
+            </div>
+            <button onclick="toggleView('worker')" class="text-zinc-300 hover:text-white text-xs font-bold uppercase tracking-wider bg-zinc-800 px-4 py-2 rounded-full border border-zinc-700 transition">
+                <i class="fa-solid fa-xmark"></i> Close
+            </button>
+        </header>
+
+        <div class="p-4 max-w-6xl mx-auto mt-4 space-y-6">
+            <!-- 요약 카드 -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-white p-6 rounded-3xl shadow-sm border border-zinc-200 relative overflow-hidden">
+                    <div class="absolute right-0 top-0 w-16 h-16 bg-blue-50 rounded-bl-full"></div>
+                    <h3 class="text-zinc-500 text-xs font-bold uppercase tracking-widest mb-1">Total Logs</h3>
+                    <p class="text-3xl font-black text-zinc-900" id="stat-total">0<span class="text-sm font-medium text-zinc-400 ml-1">건</span></p>
+                </div>
+                <div class="bg-white p-6 rounded-3xl shadow-sm border border-zinc-200 relative overflow-hidden">
+                    <div class="absolute right-0 top-0 w-16 h-16 bg-yellow-50 rounded-bl-full"></div>
+                    <h3 class="text-zinc-500 text-xs font-bold uppercase tracking-widest mb-1">Total Personnel</h3>
+                    <p class="text-3xl font-black text-zinc-900" id="stat-personnel">0<span class="text-sm font-medium text-zinc-400 ml-1">명</span></p>
+                </div>
+                <div class="bg-white p-6 rounded-3xl shadow-sm border border-zinc-200 relative overflow-hidden">
+                    <div class="absolute right-0 top-0 w-16 h-16 bg-emerald-50 rounded-bl-full"></div>
+                    <h3 class="text-zinc-500 text-xs font-bold uppercase tracking-widest mb-1">Total Photos</h3>
+                    <p class="text-3xl font-black text-zinc-900" id="stat-photos">0<span class="text-sm font-medium text-zinc-400 ml-1">장</span></p>
+                </div>
+            </div>
+
+            <!-- 차트 섹션 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Bar Chart -->
+                <div class="bg-white p-6 rounded-3xl shadow-sm border border-zinc-200">
+                    <h3 class="text-sm font-bold text-zinc-800 tracking-wide mb-4">최근 투입 인원 추이 (단위: 명)</h3>
+                    <div class="relative h-64 w-full">
+                        <canvas id="trendChart"></canvas>
+                    </div>
+                </div>
+                <!-- Doughnut Chart -->
+                <div class="bg-white p-6 rounded-3xl shadow-sm border border-zinc-200">
+                    <h3 class="text-sm font-bold text-zinc-800 tracking-wide mb-4">공정별 투입 인력 비율</h3>
+                    <div class="relative h-64 w-full flex justify-center">
+                        <canvas id="processChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- DB 테이블 -->
+            <div class="bg-white rounded-3xl shadow-sm border border-zinc-200 overflow-hidden">
+                <div class="p-5 border-b border-zinc-100 bg-zinc-50/50 flex items-center gap-2">
+                    <i class="fa-solid fa-server text-[#D4AF37]"></i>
+                    <h2 class="text-sm font-bold text-zinc-800 tracking-wide">MASTER DATABASE</h2>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left">
+                        <thead class="text-[10px] text-zinc-500 uppercase tracking-widest bg-zinc-100/50 border-b border-zinc-200">
+                            <tr>
+                                <th class="px-5 py-4 font-bold">날짜</th>
+                                <th class="px-5 py-4 font-bold">공정 내역 및 투입 자원</th>
+                                <th class="px-5 py-4 font-bold">작업 내용</th>
+                                <th class="px-5 py-4 font-bold text-center">동기화</th>
+                            </tr>
+                        </thead>
+                        <tbody id="adminTableBody" class="text-zinc-700">
+                            <tr><td colspan="4" class="text-center py-12 text-zinc-400 font-medium">수집된 현장 데이터가 없습니다.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ==================== [3. 시스템 설정 화면 (Settings)] ==================== -->
+    <div id="settingsView" class="hidden-view bg-zinc-50 min-h-screen pb-20 view-transition">
+        <header class="bg-zinc-900 text-white p-6 shadow-xl flex justify-between items-center rounded-b-3xl">
+            <div>
+                <h1 class="text-xl font-bold tracking-tight text-zinc-100">SYSTEM SETTINGS</h1>
+                <p class="text-zinc-400 text-[10px] uppercase tracking-widest mt-1">자원 마스터 데이터 관리</p>
+            </div>
+            <button onclick="toggleView('worker')" class="text-zinc-300 hover:text-white text-xs font-bold uppercase tracking-wider bg-zinc-800 px-4 py-2 rounded-full border border-zinc-700 transition">
+                <i class="fa-solid fa-check mr-1"></i> Done
+            </button>
+        </header>
+
+        <main class="p-4 max-w-xl mx-auto mt-4 space-y-6">
+            
+            <!-- 현장(사이트) 설정 추가 -->
+            <section class="glass-card rounded-3xl p-6 border-[#D4AF37]">
+                <div class="flex items-center gap-2 mb-4">
+                    <i class="fa-solid fa-map-location-dot text-[#D4AF37]"></i>
+                    <h2 class="text-sm font-bold text-zinc-800 tracking-wide uppercase">현장(프로젝트) 관리</h2>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">현재 활성화된 현장</label>
+                    <select id="currentSiteSelect" onchange="changeCurrentSite()" class="w-full bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm rounded-xl focus:ring-[#D4AF37] focus:border-[#D4AF37] block p-3 outline-none transition-all shadow-inner font-bold text-blue-800">
+                        <!-- JS 렌더링 -->
+                    </select>
+                </div>
+                <div class="flex gap-2 mb-4">
+                    <input type="text" id="newSite" placeholder="새로운 현장명 입력" class="flex-1 bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-[#D4AF37]">
+                    <button onclick="addMasterItem('site')" class="bg-[#D4AF37] text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-[#B8860B] transition shadow-md">현장 추가</button>
+                </div>
+                <div id="settingsSiteList" class="space-y-2 max-h-40 overflow-y-auto">
+                    <!-- JS 렌더링 -->
+                </div>
+            </section>
+
+            <!-- 인력 설정 -->
+            <section class="glass-card rounded-3xl p-6">
+                <div class="flex items-center gap-2 mb-4">
+                    <i class="fa-solid fa-users text-[#D4AF37]"></i>
+                    <h2 class="text-sm font-bold text-zinc-800 tracking-wide uppercase">인력 종류 설정</h2>
+                </div>
+                <div class="flex gap-2 mb-4">
+                    <input type="text" id="newPersonnel" placeholder="새로운 인력/단가 입력" class="flex-1 bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-[#D4AF37]">
+                    <button onclick="addMasterItem('personnel')" class="bg-zinc-900 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-zinc-800 transition">추가</button>
+                </div>
+                <div id="settingsPersonnelList" class="space-y-2 max-h-60 overflow-y-auto">
+                    <!-- JS 렌더링 -->
+                </div>
+            </section>
+
+            <!-- 장비 설정 -->
+            <section class="glass-card rounded-3xl p-6">
+                <div class="flex items-center gap-2 mb-4">
+                    <i class="fa-solid fa-truck text-[#D4AF37]"></i>
+                    <h2 class="text-sm font-bold text-zinc-800 tracking-wide uppercase">장비 종류 설정</h2>
+                </div>
+                <div class="flex gap-2 mb-4">
+                    <input type="text" id="newEquipment" placeholder="새로운 장비 입력" class="flex-1 bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-[#D4AF37]">
+                    <button onclick="addMasterItem('equipment')" class="bg-zinc-900 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-zinc-800 transition">추가</button>
+                </div>
+                <div id="settingsEquipmentList" class="space-y-2 max-h-60 overflow-y-auto">
+                    <!-- JS 렌더링 -->
+                </div>
+            </section>
+
+            <!-- 시트 연동 설정 안내 -->
+            <section class="bg-blue-50 border border-blue-100 rounded-3xl p-6">
+                <h3 class="text-sm font-bold text-blue-800 mb-2"><i class="fa-solid fa-link"></i> 구글 스프레드시트 연동 안내</h3>
+                <p class="text-xs text-blue-600 leading-relaxed mb-3">
+                    데이터를 구글 시트로 자동 전송하려면 Google Apps Script 웹앱 URL이 필요합니다.<br>
+                    실제 환경에서는 관리자가 스크립트를 배포한 후 소스코드의 <code>GOOGLE_SHEET_WEBAPP_URL</code> 변수에 해당 URL을 입력해야 합니다.
+                </p>
+                <input type="text" value="https://script.google.com/macros/s/..." readonly class="w-full bg-white border border-blue-200 text-blue-400 text-xs rounded-lg p-3 outline-none cursor-not-allowed">
+            </section>
+
+        </main>
+    </div>
+
+
+    <!-- 성공 모달 -->
+    <div id="successModal" class="fixed inset-0 bg-zinc-900/60 backdrop-blur-md flex items-center justify-center z-50 hidden-view">
+        <div class="bg-white p-8 rounded-[2rem] shadow-2xl flex flex-col items-center animate-[bounce_0.3s_ease-out] border border-zinc-100">
+            <div class="w-20 h-20 rounded-full bg-green-50 flex items-center justify-center mb-4">
+                <i class="fa-solid fa-check text-4xl text-green-500"></i>
+            </div>
+            <h3 class="text-xl font-black text-zinc-900 tracking-tight">전송 완료</h3>
+            <p class="text-sm text-zinc-500 mt-2 font-medium">로컬 및 스프레드시트로 전송되었습니다.</p>
+        </div>
+    </div>
+
+    <!-- ==================== [자바스크립트 로직] ==================== -->
+    <script>
+        // --- 0. 구글 시트 웹앱 URL 설정 ---
+        // ★ 여기에 구글 앱스 스크립트에서 발급받은 웹앱 URL을 입력하세요.
+        const GOOGLE_SHEET_WEBAPP_URL = ""; 
+
+        // --- 1. 마스터 데이터 (로컬 스토리지 연동) ---
+        const defaultMasterData = {
+            sites: ['덕동골 현장', 'A프로젝트', 'B프로젝트'],
+            currentSite: '덕동골 현장',
+            mainProcesses: ['토목공사', '건축공사', '전기공사', '설비공사', '기타/공통'],
+            subProcesses: {
+                '토목공사': ['터파기', '흙막이', '잔토처리', '관로매설'],
+                '건축공사': ['골조공사(철근)', '골조공사(콘크리트)', '조적/미장', '방수공사', '내장공사'],
+                '전기공사': ['배관배선', '입선', '기구취부'],
+                '설비공사': ['위생배관', '소방설비', '덕트공사'],
+                '기타/공통': ['자재정리', '현장청소', '도급/외주작업']
+            },
+            personnelTypes: ['현장소장(직영)', '기공(목수)', '기공(철근)', '조공(일반)', '인원35(단가)', '인원28(단가)', '[도급] A업체'],
+            equipmentTypes: ['굴삭기 02', '굴삭기 06', '지게차', '펌프카', '크레인 25T']
+        };
+
+        let masterData = JSON.parse(localStorage.getItem('fieldLogMasterData')) || defaultMasterData;
+
+        // 마스터 데이터 필수값 검증 (업데이트 대비)
+        if(!masterData.sites || masterData.sites.length === 0) {
+            masterData.sites = ['덕동골 현장'];
+            masterData.currentSite = '덕동골 현장';
+        }
+
+        function saveMasterData() {
+            localStorage.setItem('fieldLogMasterData', JSON.stringify(masterData));
+        }
+
+        // 전역 상태
+        let dbLogs = JSON.parse(localStorage.getItem('fieldLogDbLogs')) || [];
+        let formPhotos = [];
+        let processBlockCount = 0;
+        
+        let trendChartInstance = null;
+        let processChartInstance = null;
+
+        // --- 2. 초기화 로직 ---
+        document.addEventListener('DOMContentLoaded', () => {
+            // 날짜 세팅 (UTC 오류를 방지하기 위해 한국(로컬) 시간 기준 적용)
+            const today = new Date();
+            const offset = today.getTimezoneOffset() * 60000;
+            const localDate = new Date(today.getTime() - offset).toISOString().split('T')[0];
+            document.getElementById('logDate').value = localDate;
+            
+            updateHeaderSiteName();
+            renderPhotos();
+            addProcessBlock(); 
+            renderSettingsList();
+        });
+
+        function updateHeaderSiteName() {
+            document.getElementById('headerSiteName').innerText = `${masterData.currentSite} 통합 관제 시스템`;
+        }
+
+        // --- 3. UI 뷰 전환 ---
+        function toggleView(view) {
+            document.getElementById('workerView').classList.add('hidden-view');
+            document.getElementById('adminView').classList.add('hidden-view');
+            document.getElementById('settingsView').classList.add('hidden-view');
+
+            document.getElementById(`${view}View`).classList.remove('hidden-view');
+
+            if (view === 'admin') {
+                renderAdminDashboard();
+            } else if (view === 'worker') {
+                const blocks = document.querySelectorAll('.process-block-element');
+                blocks.forEach(block => {
+                    const blockId = block.id.split('_')[1];
+                    updateResourceSelects(blockId);
+                });
+            }
+        }
+
+        // --- 4. 설정(Settings) 관리 로직 ---
+        function renderSettingsList() {
+            const siteSelect = document.getElementById('currentSiteSelect');
+            siteSelect.innerHTML = masterData.sites.map(site => `<option value="${site}" ${site === masterData.currentSite ? 'selected' : ''}>${site}</option>`).join('');
+
+            const renderList = (type, listId) => {
+                const container = document.getElementById(listId);
+                const items = masterData[type === 'site' ? 'sites' : `${type}Types`];
+                container.innerHTML = items.map((item, idx) => `
+                    <div class="flex justify-between items-center bg-white border border-zinc-100 p-3 rounded-xl shadow-sm">
+                        <span class="text-sm font-medium text-zinc-700">${item}</span>
+                        <button onclick="removeMasterItem('${type}', ${idx})" class="text-red-400 hover:text-red-600 transition"><i class="fa-solid fa-trash-can"></i></button>
+                    </div>
+                `).join('');
+            };
+            renderList('site', 'settingsSiteList');
+            renderList('personnel', 'settingsPersonnelList');
+            renderList('equipment', 'settingsEquipmentList');
+        }
+
+        function changeCurrentSite() {
+            masterData.currentSite = document.getElementById('currentSiteSelect').value;
+            saveMasterData();
+            updateHeaderSiteName();
+        }
+
+        function addMasterItem(type) {
+            const inputId = type === 'site' ? 'newSite' : `new${type.charAt(0).toUpperCase() + type.slice(1)}`;
+            const input = document.getElementById(inputId);
+            const val = input.value.trim();
+            const targetArray = type === 'site' ? masterData.sites : masterData[`${type}Types`];
+            
+            if (val && !targetArray.includes(val)) {
+                targetArray.push(val);
+                if(type === 'site' && targetArray.length === 1) { masterData.currentSite = val; }
+                saveMasterData();
+                renderSettingsList();
+                if(type === 'site') updateHeaderSiteName();
+                input.value = '';
+            }
+        }
+
+        function removeMasterItem(type, index) {
+            const targetArray = type === 'site' ? masterData.sites : masterData[`${type}Types`];
+            
+            // 현장은 최소 1개 필수 유지 로직 추가 (오류 방지)
+            if (type === 'site' && targetArray.length <= 1) {
+                alert('시스템 운영을 위해 최소 1개의 현장은 존재해야 합니다.');
+                return;
+            }
+
+            const removedItem = targetArray.splice(index, 1)[0];
+            
+            if(type === 'site' && masterData.currentSite === removedItem) {
+                masterData.currentSite = targetArray[0];
+            }
+            
+            saveMasterData();
+            renderSettingsList();
+            if(type === 'site') updateHeaderSiteName();
+        }
+
+        function updateResourceSelects(blockId) {
+            ['personnel', 'equipment'].forEach(type => {
+                const selects = document.querySelectorAll(`#${type}Container_${blockId} .resource-select`);
+                const options = type === 'personnel' ? masterData.personnelTypes : masterData.equipmentTypes;
+                
+                selects.forEach(select => {
+                    const currentVal = select.value;
+                    let optionsHtml = `<option value="">선택</option>`;
+                    options.forEach(opt => {
+                        optionsHtml += `<option value="${opt}" ${opt === currentVal ? 'selected' : ''}>${opt}</option>`;
+                    });
+                    select.innerHTML = optionsHtml;
+                });
+            });
+        }
+
+
+        // --- 5. 사진 처리 로직 ---
+        function handlePhotoUpload(e) {
+            const files = Array.from(e.target.files);
+            if (formPhotos.length + files.length > 6) {
+                alert('사진은 최대 6장까지만 첨부 가능합니다.');
+                return;
+            }
+            files.forEach(file => { formPhotos.push(URL.createObjectURL(file)); });
+            renderPhotos();
+            e.target.value = '';
+        }
+
+        function removePhoto(index) {
+            formPhotos.splice(index, 1);
+            renderPhotos();
+        }
+
+        function renderPhotos() {
+            const grid = document.getElementById('photoGrid');
+            grid.innerHTML = '';
+            document.getElementById('photoCount').innerText = `${formPhotos.length} / 6`;
+            
+            formPhotos.forEach((src, idx) => {
+                grid.innerHTML += `
+                    <div class="relative aspect-square rounded-2xl overflow-hidden shadow-md group">
+                        <img src="${src}" class="w-full h-full object-cover" />
+                        <div class="absolute inset-0 bg-zinc-900/50 flex items-center justify-center opacity-0 hover:opacity-100 transition-all backdrop-blur-sm">
+                            <button onclick="removePhoto(${idx})" class="bg-red-500 text-white w-10 h-10 rounded-full shadow-lg transform hover:scale-110 transition"><i class="fa-solid fa-trash-can"></i></button>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            for(let i = formPhotos.length; i < 6; i++) {
+                if (i === formPhotos.length) {
+                    grid.innerHTML += `
+                        <div onclick="document.getElementById('photoInput').click()" class="aspect-square rounded-2xl border-2 border-dashed border-[#D4AF37] bg-[#D4AF37]/5 text-[#D4AF37] flex flex-col items-center justify-center cursor-pointer hover:bg-[#D4AF37]/10 transition-colors shadow-inner">
+                            <i class="fa-solid fa-camera text-2xl mb-2"></i>
+                            <span class="text-[10px] font-bold uppercase tracking-wider">Add Photo</span>
+                        </div>
+                    `;
+                } else {
+                    grid.innerHTML += `
+                        <div class="aspect-square rounded-2xl border border-zinc-200 bg-zinc-50 flex items-center justify-center">
+                            <i class="fa-regular fa-image text-zinc-300 text-2xl"></i>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        // --- 6. 다중 공정 블록 로직 ---
+        function addProcessBlock() {
+            processBlockCount++;
+            const blockId = processBlockCount;
+            const container = document.getElementById('processesContainer');
+            
+            let mainOptions = '<option value="">선택하세요</option>';
+            masterData.mainProcesses.forEach(p => mainOptions += `<option value="${p}">${p}</option>`);
+
+            const blockHTML = `
+                <div id="processBlock_${blockId}" class="process-block-element glass-card rounded-3xl p-6 relative">
+                    <button onclick="removeProcessBlock(${blockId})" class="delete-block-btn absolute top-6 right-6 text-zinc-300 hover:text-red-500 transition-colors ${blockId === 1 && container.children.length === 0 ? 'hidden' : ''}">
+                        <i class="fa-solid fa-xmark text-xl"></i>
+                    </button>
+
+                    <div class="flex items-center gap-3 mb-5">
+                        <div class="w-8 h-8 rounded-full bg-zinc-900 text-[#D4AF37] flex items-center justify-center font-black text-sm shadow-md block-number">
+                            ${container.children.length + 1}
+                        </div>
+                        <h2 class="text-sm font-bold text-zinc-800 tracking-wide uppercase">Process <span class="font-light text-zinc-400">|</span> 작업 공정</h2>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <div>
+                            <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Main</label>
+                            <select id="mainProcess_${blockId}" onchange="updateSubProcess(${blockId})" class="w-full bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm rounded-xl focus:ring-[#D4AF37] focus:border-[#D4AF37] block p-3 outline-none transition-all shadow-inner">
+                                ${mainOptions}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 ml-1">Sub</label>
+                            <select id="subProcess_${blockId}" disabled class="w-full bg-zinc-50 border border-zinc-200 text-zinc-900 text-sm rounded-xl focus:ring-[#D4AF37] focus:border-[#D4AF37] block p-3 disabled:opacity-50 outline-none transition-all shadow-inner">
+                                <option value="">세부 선택</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="space-y-4">
+                        <div class="bg-zinc-50 rounded-2xl p-4 border border-zinc-100">
+                            <div class="flex justify-between items-center mb-3">
+                                <h3 class="text-[11px] font-bold text-zinc-600 tracking-widest uppercase flex items-center">
+                                    <i class="fa-solid fa-users mr-2 text-zinc-400"></i> Personnel
+                                </h3>
+                                <button onclick="addResourceRow(${blockId}, 'personnel')" class="text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition">
+                                    + 인력 추가
+                                </button>
+                            </div>
+                            <div id="personnelContainer_${blockId}" class="space-y-2"></div>
+                        </div>
+                        <div class="bg-zinc-50 rounded-2xl p-4 border border-zinc-100">
+                            <div class="flex justify-between items-center mb-3">
+                                <h3 class="text-[11px] font-bold text-zinc-600 tracking-widest uppercase flex items-center">
+                                    <i class="fa-solid fa-truck mr-2 text-zinc-400"></i> Equipment
+                                </h3>
+                                <button onclick="addResourceRow(${blockId}, 'equipment')" class="text-amber-600 bg-amber-50 hover:bg-amber-100 px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider transition">
+                                    + 장비 추가
+                                </button>
+                            </div>
+                            <div id="equipmentContainer_${blockId}" class="space-y-2"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            container.insertAdjacentHTML('beforeend', blockHTML);
+            updateBlockNumbers();
+            
+            const deleteBtns = document.querySelectorAll('.delete-block-btn');
+            if(deleteBtns.length > 1) { deleteBtns.forEach(btn => btn.classList.remove('hidden')); }
+        }
+
+        function removeProcessBlock(blockId) {
+            const container = document.getElementById('processesContainer');
+            if(container.children.length <= 1) return; 
+            document.getElementById(`processBlock_${blockId}`).remove();
+            updateBlockNumbers();
+            if(container.children.length === 1) { document.querySelector('.delete-block-btn').classList.add('hidden'); }
+        }
+
+        function updateBlockNumbers() {
+            document.querySelectorAll('.block-number').forEach((el, index) => { el.innerText = index + 1; });
+        }
+
+        function updateSubProcess(blockId) {
+            const mainVal = document.getElementById(`mainProcess_${blockId}`).value;
+            const subSelect = document.getElementById(`subProcess_${blockId}`);
+            
+            subSelect.innerHTML = '<option value="">세부 선택</option>';
+            if (mainVal) {
+                subSelect.disabled = false;
+                masterData.subProcesses[mainVal].forEach(p => { subSelect.add(new Option(p, p)); });
+            } else { subSelect.disabled = true; }
+        }
+
+        function addResourceRow(blockId, type) {
+            const container = document.getElementById(`${type}Container_${blockId}`);
+            const options = type === 'personnel' ? masterData.personnelTypes : masterData.equipmentTypes;
+            const unit = type === 'personnel' ? '명' : '대';
+            const step = type === 'personnel' ? '0.5' : '1';
+            
+            const row = document.createElement('div');
+            row.className = 'flex gap-2 items-center resource-row';
+            
+            let optionsHtml = `<option value="">선택</option>`;
+            options.forEach(opt => optionsHtml += `<option value="${opt}">${opt}</option>`);
+
+            row.innerHTML = `
+                <select class="flex-1 bg-white border border-zinc-200 text-zinc-800 text-xs rounded-xl p-3 outline-none focus:border-[#D4AF37] resource-select">
+                    ${optionsHtml}
+                </select>
+                <div class="flex items-center bg-white border border-zinc-200 rounded-xl overflow-hidden w-24 focus-within:border-[#D4AF37]">
+                    <input type="number" min="${step}" step="${step}" value="1" class="w-full text-center text-xs p-3 outline-none resource-count font-bold"/>
+                    <span class="bg-zinc-50 text-zinc-400 text-[10px] font-bold px-2 py-3 border-l border-zinc-200">${unit}</span>
+                </div>
+                <button onclick="this.closest('.resource-row').remove()" class="p-3 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
+            `;
+            container.appendChild(row);
+        }
+
+        // --- 7. 구글 스프레드시트 연동 함수 ---
+        async function sendToGoogleSheet(logData) {
+            if(!GOOGLE_SHEET_WEBAPP_URL) {
+                console.warn("Google Sheet 연동 URL이 설정되지 않았습니다. 로컬에만 저장됩니다.");
+                return true; 
+            }
+
+            try {
+                const payload = {
+                    siteName: logData.siteName,
+                    date: logData.date,
+                    notes: logData.notes,
+                    processes: JSON.stringify(logData.processes) 
+                };
+
+                const response = await fetch(GOOGLE_SHEET_WEBAPP_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams(payload)
+                });
+                return true;
+            } catch (error) {
+                console.error("구글 시트 전송 오류:", error);
+                return false;
+            }
+        }
+
+        // --- 8. 폼 전송 로직 ---
+        async function submitForm() {
+            const date = document.getElementById('logDate').value;
+            const notes = document.getElementById('logNotes').value;
+            
+            const processElements = document.querySelectorAll('.process-block-element');
+            const processesData = [];
+            let isValid = true;
+
+            processElements.forEach(block => {
+                const blockId = block.id.split('_')[1];
+                const mainProcess = document.getElementById(`mainProcess_${blockId}`).value;
+                const subProcess = document.getElementById(`subProcess_${blockId}`).value;
+                
+                if (!mainProcess || !subProcess) isValid = false;
+
+                const getResources = (type) => {
+                    const rows = document.getElementById(`${type}Container_${blockId}`).querySelectorAll('.resource-row');
+                    const data = [];
+                    rows.forEach(row => {
+                        const rType = row.querySelector('.resource-select').value;
+                        const count = parseFloat(row.querySelector('.resource-count').value);
+                        if (rType && count > 0) data.push({ type: rType, count });
+                    });
+                    return data;
+                };
+
+                processesData.push({
+                    mainProcess,
+                    subProcess,
+                    personnel: getResources('personnel'),
+                    equipment: getResources('equipment')
+                });
+            });
+
+            if (!isValid) {
+                alert('모든 공정의 [주공정]과 [부공정]을 선택해주세요.');
+                return;
+            }
+
+            const btn = document.getElementById('submitBtn');
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> <span class="tracking-wide">데이터 동기화 중...</span>`;
+            btn.disabled = true;
+
+            const newLog = {
+                id: Date.now(),
+                siteName: masterData.currentSite,
+                date: date,
+                notes: notes,
+                photos: [...formPhotos],
+                processes: processesData 
+            };
+
+            // 구글 시트 전송 시도
+            await sendToGoogleSheet(newLog);
+
+            // 로컬 스토리지에 저장 (DB 역할)
+            dbLogs.unshift(newLog);
+            localStorage.setItem('fieldLogDbLogs', JSON.stringify(dbLogs));
+
+            // UI 초기화
+            document.getElementById('logNotes').value = '';
+            formPhotos = [];
+            renderPhotos();
+            
+            const container = document.getElementById('processesContainer');
+            container.innerHTML = '';
+            processBlockCount = 0;
+            addProcessBlock();
+
+            btn.innerHTML = `<i class="fa-solid fa-paper-plane"></i> <span class="tracking-wide">업무일지 최종 결재</span>`;
+            btn.disabled = false;
+
+            const modal = document.getElementById('successModal');
+            modal.classList.remove('hidden-view');
+            setTimeout(() => modal.classList.add('hidden-view'), 2000);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // --- 9. 관리자 화면 및 대시보드 차트 렌더링 ---
+        function renderAdminDashboard() {
+            // 현재 활성화된 현장의 데이터만 필터링 (구버전 호환성 방어 코드 추가)
+            const currentSiteLogs = dbLogs.filter(log => log.siteName === masterData.currentSite && log.processes);
+
+            // 요약 통계
+            document.getElementById('stat-total').innerHTML = `${currentSiteLogs.length}<span class="text-sm font-medium text-zinc-400 ml-1">건</span>`;
+            
+            let totalPersonnel = 0;
+            let totalPhotos = 0;
+            
+            const dateMap = {}; 
+            const processMap = {}; 
+
+            currentSiteLogs.forEach(log => {
+                totalPhotos += (log.photos ? log.photos.length : 0);
+                let dailyPersonnel = 0;
+
+                log.processes.forEach(proc => {
+                    const processPersonnel = proc.personnel.reduce((sum, p) => sum + p.count, 0);
+                    dailyPersonnel += processPersonnel;
+                    totalPersonnel += processPersonnel;
+
+                    // 주공정별 인력 누적
+                    if(proc.mainProcess) {
+                        processMap[proc.mainProcess] = (processMap[proc.mainProcess] || 0) + processPersonnel;
+                    }
+                });
+
+                // 일자별 인력 누적
+                dateMap[log.date] = (dateMap[log.date] || 0) + dailyPersonnel;
+            });
+            
+            document.getElementById('stat-personnel').innerHTML = `${totalPersonnel}<span class="text-sm font-medium text-zinc-400 ml-1">명</span>`;
+            document.getElementById('stat-photos').innerHTML = `${totalPhotos}<span class="text-sm font-medium text-zinc-400 ml-1">장</span>`;
+
+            // --- 차트 렌더링 로직 ---
+            renderCharts(dateMap, processMap);
+
+            // 테이블 렌더링
+            const tbody = document.getElementById('adminTableBody');
+            tbody.innerHTML = '';
+
+            if (currentSiteLogs.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="text-center py-12 text-zinc-400 font-medium">[${masterData.currentSite}] 수집된 현장 데이터가 없습니다.</td></tr>`;
+                return;
+            }
+
+            currentSiteLogs.forEach(log => {
+                let processesHTML = '<div class="space-y-3">';
+                log.processes.forEach((proc, idx) => {
+                    const pText = proc.personnel.map(p => `<span class="inline-block bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded mr-1 mb-1">${p.type} <strong class="text-blue-600">${p.count}</strong></span>`).join('');
+                    const eText = proc.equipment.map(e => `<span class="inline-block bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded mr-1 mb-1">${e.type} <strong class="text-amber-600">${e.count}</strong></span>`).join('');
+                    
+                    processesHTML += `
+                        <div class="${idx !== log.processes.length - 1 ? 'border-b border-zinc-100 pb-3' : ''}">
+                            <div class="font-bold text-zinc-800 mb-1">
+                                <span class="bg-zinc-800 text-[#D4AF37] text-[10px] px-1.5 py-0.5 rounded mr-1">${idx + 1}</span>
+                                ${proc.mainProcess} <span class="text-zinc-400 font-normal">|</span> ${proc.subProcess}
+                            </div>
+                            <div class="text-xs mt-1"><span class="text-zinc-400 mr-1"><i class="fa-solid fa-users"></i></span> ${pText || '<span class="text-zinc-300">없음</span>'}</div>
+                            <div class="text-xs mt-1"><span class="text-zinc-400 mr-1"><i class="fa-solid fa-truck"></i></span> ${eText || '<span class="text-zinc-300">없음</span>'}</div>
+                        </div>
+                    `;
+                });
+                processesHTML += '</div>';
+
+                tbody.innerHTML += `
+                    <tr class="border-b border-zinc-100 hover:bg-zinc-50/50 transition-colors">
+                        <td class="px-5 py-4 font-bold text-zinc-800 align-top whitespace-nowrap">${log.date}</td>
+                        <td class="px-5 py-4 align-top w-1/2">${processesHTML}</td>
+                        <td class="px-5 py-4 align-top text-xs text-zinc-500 whitespace-pre-wrap">${log.notes || '-'}</td>
+                        <td class="px-5 py-4 align-top text-center text-xs text-emerald-600 font-bold"><i class="fa-solid fa-cloud-arrow-up"></i> 완료</td>
+                    </tr>
+                `;
+            });
+        }
+
+        // Chart.js 렌더링 함수 (에러 방지 처리 완료)
+        function renderCharts(dateMap, processMap) {
+            const sortedDates = Object.keys(dateMap).sort().slice(-7); 
+            const trendData = sortedDates.map(date => dateMap[date]);
+
+            const trendCtx = document.getElementById('trendChart').getContext('2d');
+            if(trendChartInstance) trendChartInstance.destroy();
+            trendChartInstance = new Chart(trendCtx, {
+                type: 'bar',
+                data: {
+                    labels: sortedDates.length > 0 ? sortedDates.map(d => d.slice(5)) : ['데이터 없음'], 
+                    datasets: [{
+                        label: '투입 인원',
+                        data: trendData.length > 0 ? trendData : [0],
+                        backgroundColor: '#D4AF37',
+                        borderRadius: 6
+                    }]
+                },
+                options: { maintainAspectRatio: false, plugins: { legend: { display: false } } }
+            });
+
+            const processLabels = Object.keys(processMap);
+            const processData = Object.values(processMap);
+            
+            const processCtx = document.getElementById('processChart').getContext('2d');
+            if(processChartInstance) processChartInstance.destroy();
+            processChartInstance = new Chart(processCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: processLabels.length > 0 ? processLabels : ['데이터 없음'],
+                    datasets: [{
+                        data: processData.length > 0 ? processData : [1],
+                        backgroundColor: processData.length > 0 ? ['#27272a', '#D4AF37', '#3b82f6', '#10b981', '#f59e0b', '#64748b'] : ['#e4e4e7'],
+                        borderWidth: 0
+                    }]
+                },
+                options: { maintainAspectRatio: false, cutout: '70%', plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } } } }
+            });
+        }
+    </script>
+</body>
+</html>
