@@ -36,7 +36,7 @@
 
     // --- 🚀 구글 앱스 스크립트(GAS) URL 입력란 ---
     // 발급받으신 웹앱 URL을 아래 따옴표 안에 넣으세요.
-    const GAS_URL = "여기에_앱스크립트_URL_붙여넣기";
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbyzmdTEBrfbcJsuvr29xOhaemgR3dUsHr8DybTq48dJADT7nHXRTcADK8kafHrdz3tK/exec";
 
     // --- 전역 설정 및 초기 데이터 ---
     const COLUMN_THEMES = {
@@ -111,7 +111,7 @@
 
       // --- 🌐 클라우드에 데이터 저장하기 (POST) ---
       const syncToCloud = async () => {
-        if (!GAS_URL || GAS_URL === "여기에_앱스크립트_URL_붙여넣기") {
+        if (!GAS_URL || GAS_URL === "https://script.google.com/macros/s/AKfycbyzmdTEBrfbcJsuvr29xOhaemgR3dUsHr8DybTq48dJADT7nHXRTcADK8kafHrdz3tK/exec") {
           return alert("구글 스크립트 웹앱 URL이 입력되지 않았습니다!\n소스 코드 상단의 GAS_URL 변수를 확인해 주세요.");
         }
         setIsSyncing(true);
