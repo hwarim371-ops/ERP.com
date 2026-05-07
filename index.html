@@ -615,8 +615,8 @@
           </header>
 
           {/* 2. 메인 칸반 보드 영역 */}
-          <div className="flex-1 overflow-x-hidden overflow-y-visible p-4 sm:p-6 relative">
-            <div className="flex flex-col gap-5 w-full max-w-5xl mx-auto">
+          <div className="flex-1 overflow-x-auto overflow-y-visible p-6 hide-scrollbar relative">
+            <div className="flex gap-5 items-start min-w-max">
               
               {accountsData.map(account => {
                 const accountBlocks = blocks.filter(b => b.accountId === account.id);
@@ -628,7 +628,7 @@
                     key={account.id}
                     onDragOver={(e) => { e.preventDefault(); }}
                     onDrop={(e) => handleDropOnColumn(e, account.id)}
-                    className={`w-full flex flex-col rounded-xl border border-[#E6E0D4] shadow-md overflow-hidden transition-colors duration-500 ${theme.panelBg}`}
+                    className={`w-[360px] flex flex-col rounded-xl border border-[#E6E0D4] shadow-md overflow-hidden transition-colors duration-500 shrink-0 ${theme.panelBg}`}
                   >
                     {/* 2-1. 패널 헤더 */}
                     <div 
@@ -810,7 +810,7 @@
               {/* === 새로운 현장 추가 버튼 (컬럼) === */}
               <div 
                 onClick={addNewAccount}
-                className="w-full min-h-[180px] flex flex-col justify-center items-center bg-[#FDFCFB]/60 hover:bg-white rounded-xl border-2 border-dashed border-[#DFD8CE] hover:border-[#8B5A2B] shadow-sm transition-all cursor-pointer group"
+                className="w-[360px] min-h-[220px] flex flex-col justify-center items-center bg-[#FDFCFB]/60 hover:bg-white rounded-xl border-2 border-dashed border-[#DFD8CE] hover:border-[#8B5A2B] shadow-sm transition-all cursor-pointer group shrink-0"
               >
                 <div className="w-14 h-14 bg-[#EFEBE4] group-hover:bg-[#8B5A2B] text-[#A69C8E] group-hover:text-white rounded-full flex items-center justify-center mb-4 transition-colors">
                   <i className="ph-bold ph-plus" style={{fontSize: 28}}></i>
