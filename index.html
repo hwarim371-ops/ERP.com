@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>화림 자금흐름 클라우드 ERP</title>
+  <title>화림 ERP</title>
   
   <!-- 오류 자동 감지 스크립트 -->
   <script>
@@ -81,11 +81,57 @@
     };
     const SUBITEM_COLOR_ORDER = Object.keys(SUBITEM_AMOUNT_COLORS);
 
+    const DEFAULT_CARD_HOLDERS = {
+      main: '대표',
+      jecheon1: '이사님',
+      miryang: '대표',
+      jecheon2: '이사님',
+    };
+
+    function HwarimLogo() {
+      return (
+        <div className="w-[96px] h-[46px] rounded-lg border border-[#D2B48C] overflow-hidden shadow-inner bg-[#D8B27A] shrink-0">
+          <svg viewBox="0 0 160 76" className="w-full h-full" role="img" aria-label="화림 로고">
+            <defs>
+              <linearGradient id="woodLogoBg" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#E7C28B" />
+                <stop offset="100%" stopColor="#C79255" />
+              </linearGradient>
+            </defs>
+            <rect width="160" height="76" fill="url(#woodLogoBg)" />
+            <path d="M15 18 C45 13, 72 23, 103 14 C122 9, 141 13, 158 20" stroke="#B07C46" strokeWidth="2" fill="none" opacity="0.35" />
+            <path d="M2 58 C37 47, 72 63, 112 50 C132 44, 146 47, 160 54" stroke="#9A6A3A" strokeWidth="2" fill="none" opacity="0.3" />
+            <g stroke="#3B2418" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" fill="none">
+              <path d="M38 59 V25" />
+              <path d="M50 59 V18" />
+              <path d="M62 59 V28" />
+              <path d="M50 28 C41 22, 36 16, 34 10" />
+              <path d="M50 31 C61 22, 66 16, 71 8" />
+              <path d="M39 39 C31 34, 25 30, 21 23" />
+              <path d="M62 39 C72 33, 79 27, 84 19" />
+              <path d="M31 48 C24 45, 19 42, 15 37" />
+              <path d="M70 49 C78 45, 85 41, 91 35" />
+            </g>
+            <g fill="#3B2418">
+              <ellipse cx="28" cy="20" rx="3" ry="6" transform="rotate(-35 28 20)" />
+              <ellipse cx="73" cy="16" rx="3" ry="6" transform="rotate(35 73 16)" />
+              <ellipse cx="18" cy="35" rx="3" ry="5" transform="rotate(-48 18 35)" />
+              <ellipse cx="88" cy="31" rx="3" ry="5" transform="rotate(45 88 31)" />
+              <ellipse cx="45" cy="12" rx="3" ry="5" />
+            </g>
+            <text x="94" y="32" fontFamily="Malgun Gothic, sans-serif" fontSize="12" fontWeight="800" fill="#3B2418">조화로움이</text>
+            <text x="98" y="47" fontFamily="Malgun Gothic, sans-serif" fontSize="12" fontWeight="800" fill="#3B2418">숲을 이룬다</text>
+            <text x="92" y="66" fontFamily="Malgun Gothic, sans-serif" fontSize="29" fontWeight="900" fill="#3B2418">화림</text>
+          </svg>
+        </div>
+      );
+    }
+
     const INITIAL_ACCOUNTS = [
-      { id: 'main', name: '화림 법인 (메인)', bank: '우리은행', accountNo: '1005-704-610473', icon: 'ph-fill ph-buildings', theme: 'wood', reportData: [] },
-      { id: 'jecheon1', name: '제천1 (오차드블리드)', bank: '우리은행', accountNo: '1005-504-710497', icon: 'ph-fill ph-hard-hat', theme: 'forest', reportData: [] },
-      { id: 'miryang', name: '밀양 (다시,또 여기)', bank: '기업은행', accountNo: '587-076008-04-011', icon: 'ph-fill ph-hard-hat', theme: 'ocean', reportData: [] },
-      { id: 'jecheon2', name: '제천2 (덕동골)', bank: '우리은행', accountNo: '1005-804-800910', icon: 'ph-fill ph-hard-hat', theme: 'wine', reportData: [] },
+      { id: 'main', name: '화림 법인 (메인)', bank: '우리은행', accountNo: '1005-704-610473', icon: 'ph-fill ph-buildings', theme: 'wood', cardHolder: '대표', reportData: [] },
+      { id: 'jecheon1', name: '제천1 (오차드블리드)', bank: '우리은행', accountNo: '1005-504-710497', icon: 'ph-fill ph-hard-hat', theme: 'forest', cardHolder: '이사님', reportData: [] },
+      { id: 'miryang', name: '밀양 (다시,또 여기)', bank: '기업은행', accountNo: '587-076008-04-011', icon: 'ph-fill ph-hard-hat', theme: 'ocean', cardHolder: '대표', reportData: [] },
+      { id: 'jecheon2', name: '제천2 (덕동골)', bank: '우리은행', accountNo: '1005-804-800910', icon: 'ph-fill ph-hard-hat', theme: 'wine', cardHolder: '이사님', reportData: [] },
     ];
 
     const INITIAL_BLOCKS = [
@@ -116,8 +162,17 @@
       const [settingsModal, setSettingsModal] = useState({ isOpen: false, accountData: null });
       const [isSyncing, setIsSyncing] = useState(false);
       const [isInitialLoading, setIsInitialLoading] = useState(true);
+      const [lastSavedAt, setLastSavedAt] = useState(null);
+      const [collapsedSubItems, setCollapsedSubItems] = useState([]);
 
       const formatCurrency = (amount) => new Intl.NumberFormat('ko-KR').format(amount || 0);
+      const twoDigits = (value) => String(value).padStart(2, '0');
+      const formatLastSavedAt = (value) => {
+        if (!value) return '저장 기록 없음';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '저장 시간 확인 필요';
+        return `${date.getFullYear()}년 ${twoDigits(date.getMonth() + 1)}월 ${twoDigits(date.getDate())}일 ${twoDigits(date.getHours())}시 ${twoDigits(date.getMinutes())}분 데이터`;
+      };
       const getAmountValue = (item) => Number(item && item.amount) || 0;
       const getEffectiveAmount = (item) => {
         if (!item || item.isPlanned) return 0;
@@ -130,6 +185,10 @@
         if (isPlanned) return 'text-[#8B5A2B]';
         if (colorKey && colorKey !== 'auto' && SUBITEM_AMOUNT_COLORS[colorKey]) return SUBITEM_AMOUNT_COLORS[colorKey].text;
         return amount >= 0 ? 'text-[#2E7D32]' : 'text-[#C62828]';
+      };
+      const getCardHolders = (account) => {
+        const text = (account && (account.cardHolder || DEFAULT_CARD_HOLDERS[account.id])) || '';
+        return text.split(/[,，\/|]+/).map(name => name.trim()).filter(Boolean);
       };
 
       // --- 🌐 클라우드 데이터 불러오기 (GET) ---
@@ -153,6 +212,7 @@
             if (data && Object.keys(data).length > 0) {
               if (data.accountsData) setAccountsData(data.accountsData);
               if (data.blocks) setBlocks(data.blocks);
+              if (data.lastSavedAt) setLastSavedAt(data.lastSavedAt);
             }
             setIsInitialLoading(false);
           })
@@ -172,12 +232,14 @@
         }
         setIsSyncing(true);
         try {
-          const payload = { accountsData, blocks };
+          const savedAt = new Date().toISOString();
+          const payload = { accountsData, blocks, lastSavedAt: savedAt };
           await fetch(GAS_URL, {
             method: "POST",
             headers: { "Content-Type": "text/plain;charset=utf-8" },
             body: JSON.stringify(payload)
           });
+          setLastSavedAt(savedAt);
           alert("✅ 구글 시트에 안전하게 백업 및 동기화되었습니다!");
         } catch (err) {
           alert("❌ 동기화 중 오류가 발생했습니다. 권한 설정을 확인해주세요.");
@@ -480,13 +542,14 @@
           accountNo: '계좌번호 입력',
           icon: 'ph-fill ph-hard-hat',
           theme: 'slate',
+          cardHolder: '이사님',
           reportData: []
         };
         setAccountsData([...accountsData, newAcc]);
       };
 
       const openSettingsModal = (account) => {
-        setSettingsModal({ isOpen: true, accountData: { ...account } });
+        setSettingsModal({ isOpen: true, accountData: { ...account, cardHolder: account.cardHolder || DEFAULT_CARD_HOLDERS[account.id] || '' } });
       };
 
       const saveSettings = (e) => {
@@ -562,6 +625,10 @@
         setBlocks(prev => prev.map(b => b.id === blockId ? { ...b, isPlanned: !b.isPlanned } : b));
       };
 
+      const toggleSubItems = (blockId) => {
+        setCollapsedSubItems(prev => prev.includes(blockId) ? prev.filter(id => id !== blockId) : [...prev, blockId]);
+      };
+
       const saveBlock = (e) => {
         e.preventDefault();
         if (modal.mode === 'create') setBlocks(prev => [...prev, modal.blockData]);
@@ -589,27 +656,31 @@
           )}
           
           {/* 1. 상단 글로벌 헤더 */}
-          <header className="min-h-[64px] bg-[#FDFCFB] border-b border-[#E6E0D4] flex items-center justify-between px-4 sm:px-8 shrink-0 sticky top-0 z-30 shadow-sm">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-[#8B5A2B] rounded-lg flex items-center justify-center shadow-inner">
-                <i className="ph-fill ph-bank text-white" style={{fontSize: 20}}></i>
-              </div>
+          <header className="min-h-[72px] bg-[#FDFCFB] border-b border-[#E6E0D4] flex flex-wrap items-center justify-between gap-4 px-4 sm:px-8 py-3 shrink-0 sticky top-0 z-30 shadow-sm">
+            <div className="flex items-center gap-3 min-w-0">
+              <HwarimLogo />
               <div>
-                <h1 className="text-xl font-extrabold text-[#3D2B1F] tracking-tight">화림 자금흐름 ERP</h1>
+                <h1 className="text-xl font-extrabold text-[#3D2B1F] tracking-tight">화림 ERP</h1>
                 <p className="text-[10px] font-bold text-[#A69C8E] uppercase tracking-widest mt-0.5">Cloud Web Application</p>
               </div>
             </div>
 
-            <button 
-              onClick={syncToCloud}
-              disabled={isSyncing}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold border transition-colors shadow-sm
-                ${isSyncing ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'}
-              `}
-            >
-              {isSyncing ? <i className="ph-bold ph-spinner animate-spin" style={{fontSize: 16}}></i> : <i className="ph-fill ph-cloud-arrow-up" style={{fontSize: 16}}></i>} 
-              {isSyncing ? '동기화 중...' : '클라우드 저장 및 동기화'}
-            </button>
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="text-right max-w-[260px]">
+                <p className="text-[10px] font-extrabold text-[#A69C8E] uppercase tracking-widest">마지막 클라우드 저장</p>
+                <p className="text-[11px] font-bold text-[#6D5443] mt-0.5">{formatLastSavedAt(lastSavedAt)}</p>
+              </div>
+              <button 
+                onClick={syncToCloud}
+                disabled={isSyncing}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold border transition-colors shadow-sm
+                  ${isSyncing ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'}
+                `}
+              >
+                {isSyncing ? <i className="ph-bold ph-spinner animate-spin" style={{fontSize: 16}}></i> : <i className="ph-fill ph-cloud-arrow-up" style={{fontSize: 16}}></i>} 
+                {isSyncing ? '동기화 중...' : '클라우드 저장'}
+              </button>
+            </div>
           </header>
 
           {/* 2. 메인 칸반 보드 영역 */}
@@ -620,13 +691,14 @@
                 const accountBlocks = blocks.filter(b => b.accountId === account.id);
                 const accountTotal = accountBlocks.reduce((sum, b) => sum + getEffectiveAmount(b), 0);
                 const theme = COLUMN_THEMES[account.theme || 'wood'];
+                const cardHolders = getCardHolders(account);
 
                 return (
                   <div 
                     key={account.id}
                     onDragOver={(e) => { e.preventDefault(); }}
                     onDrop={(e) => handleDropOnColumn(e, account.id)}
-                    className={`w-[360px] flex flex-col rounded-xl border border-[#E6E0D4] shadow-md overflow-hidden transition-colors duration-500 shrink-0 ${theme.panelBg}`}
+                    className={`w-[360px] flex flex-col rounded-xl border-2 ${theme.border} shadow-lg overflow-hidden transition-colors duration-500 shrink-0 ${theme.panelBg}`}
                   >
                     {/* 2-1. 패널 헤더 */}
                     <div 
@@ -639,10 +711,15 @@
                       className={`px-5 py-4 bg-white border-b border-[#E6E0D4] shrink-0 ${theme.light} bg-opacity-30 cursor-grab active:cursor-grabbing`}
                       title="클릭하고 드래그하여 패널 순서 변경"
                     >
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 min-w-0">
                         <i className={`ph-bold ph-dots-six-vertical text-[#A69C8E] mr-1`} style={{fontSize: 20}}></i>
                         <i className={`${account.icon} ${theme.text}`} style={{fontSize: 18}}></i>
-                        <h2 className="font-black text-[16px] text-[#2A1D15]">{account.name}</h2>
+                        <h2 className="font-black text-[16px] text-[#2A1D15] truncate flex-1 min-w-0">{account.name}</h2>
+                        {cardHolders.map(holder => (
+                          <span key={holder} className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-md bg-white border border-[#D2B48C] text-[#8B5A2B] flex items-center gap-1 shadow-sm">
+                            <i className="ph-fill ph-credit-card" style={{fontSize: 11}}></i>카드[{holder}]
+                          </span>
+                        ))}
                       </div>
                       <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#6D5443] ml-10 opacity-80">
                         <i className="ph-fill ph-credit-card" style={{fontSize: 12}}></i> {account.bank} | <span className="font-mono">{account.accountNo}</span>
@@ -682,6 +759,7 @@
                           const tagColor = COLOR_TAGS[block.color || 'none'];
                           const hasSubItems = block.subItems && block.subItems.length > 0;
                           const isPlanned = !!block.isPlanned;
+                          const isSubItemsCollapsed = collapsedSubItems.includes(block.id);
                           
                           return (
                             <div
@@ -755,28 +833,48 @@
 
                               {hasSubItems && (
                                 <div className={`px-4 pb-3 pt-0 ${isMergeTarget ? 'opacity-30' : ''}`}>
-                                  <div className="border-t border-black/10 pt-2 space-y-1.5">
-                                    {block.subItems.map((sub, idx) => (
-                                      <div key={idx} className="flex justify-between items-center text-[11px] text-[#6D5443] font-medium group/sub">
-                                        <span className="truncate pr-2 flex items-center gap-1.5">
-                                          <span className="text-black/20">↳</span> {sub.label || '내용 없음'}
-                                        </span>
-                                        <div className="flex items-center gap-2">
-                                          <span className={`font-mono font-bold ${getAmountTextClass(sub.amount, sub.amountColor || 'auto', sub.isPlanned)}`}>
-                                            {sub.amount > 0 ? '+' : ''}{formatCurrency(sub.amount)}
-                                          </span>
-                                          {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
-                                          {/* 꺼내기 버튼 */}
-                                          <button 
-                                            onClick={(e) => { e.stopPropagation(); extractSubItem(block.id, sub.id); }}
-                                            className="opacity-0 group-hover/sub:opacity-100 p-1 bg-white border border-[#DFD8CE] text-[#8B5A2B] rounded hover:bg-[#F9F6F0] transition-opacity"
-                                            title="독립된 박스로 분리해서 밖으로 꺼내기"
-                                          >
-                                            <i className="ph-bold ph-export" style={{fontSize: 14}}></i>
-                                          </button>
-                                        </div>
+                                  <div className="border-t border-black/10 pt-2">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); toggleSubItems(block.id); }}
+                                      className="no-select-trigger w-full flex items-center justify-between gap-2 px-2 py-1.5 mb-2 rounded-lg bg-white/70 border border-[#DFD8CE] text-[#6D5443] hover:bg-white transition-colors"
+                                      title={isSubItemsCollapsed ? '세부항목 펼치기' : '세부항목 접기'}
+                                    >
+                                      <span className="text-[11px] font-extrabold flex items-center gap-1.5">
+                                        <i className="ph-bold ph-list-bullets" style={{fontSize: 13}}></i>
+                                        세부항목 {block.subItems.length}개
+                                      </span>
+                                      <span className="text-[10px] font-black text-[#8B5A2B] flex items-center gap-1">
+                                        {isSubItemsCollapsed ? '펼치기' : '접기'}
+                                        <i className={`ph-bold ${isSubItemsCollapsed ? 'ph-caret-down' : 'ph-caret-up'}`} style={{fontSize: 12}}></i>
+                                      </span>
+                                    </button>
+
+                                    {!isSubItemsCollapsed && (
+                                      <div className="space-y-1.5">
+                                        {block.subItems.map((sub, idx) => (
+                                          <div key={idx} className="flex justify-between items-center text-[11px] text-[#6D5443] font-medium group/sub">
+                                            <span className="truncate pr-2 flex items-center gap-1.5">
+                                              <span className="text-black/20">↳</span> {sub.label || '내용 없음'}
+                                            </span>
+                                            <div className="flex items-center gap-2">
+                                              <span className={`font-mono font-bold ${getAmountTextClass(sub.amount, sub.amountColor || 'auto', sub.isPlanned)}`}>
+                                                {sub.amount > 0 ? '+' : ''}{formatCurrency(sub.amount)}
+                                              </span>
+                                              {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
+                                              {/* 꺼내기 버튼 */}
+                                              <button 
+                                                onClick={(e) => { e.stopPropagation(); extractSubItem(block.id, sub.id); }}
+                                                className="opacity-0 group-hover/sub:opacity-100 p-1 bg-white border border-[#DFD8CE] text-[#8B5A2B] rounded hover:bg-[#F9F6F0] transition-opacity"
+                                                title="독립된 박스로 분리해서 밖으로 꺼내기"
+                                              >
+                                                <i className="ph-bold ph-export" style={{fontSize: 14}}></i>
+                                              </button>
+                                            </div>
+                                          </div>
+                                        ))}
                                       </div>
-                                    ))}
+                                    )}
                                   </div>
                                 </div>
                               )}
@@ -898,6 +996,10 @@
                     <div>
                       <label className="block text-xs font-extrabold text-[#6D5443] mb-1.5 uppercase">계좌번호</label>
                       <input type="text" value={settingsModal.accountData.accountNo} onChange={(e) => setSettingsModal(p => ({...p, accountData: {...p.accountData, accountNo: e.target.value}}))} className="w-full border border-[#DFD8CE] rounded-lg p-2.5 text-sm font-mono font-bold text-[#2A1D15] focus:border-[#8B5A2B] focus:outline-none"/>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-extrabold text-[#6D5443] mb-1.5 uppercase">카드 보유자</label>
+                      <input type="text" value={settingsModal.accountData.cardHolder || ''} onChange={(e) => setSettingsModal(p => ({...p, accountData: {...p.accountData, cardHolder: e.target.value}}))} className="w-full border border-[#DFD8CE] rounded-lg p-2.5 text-sm font-bold text-[#2A1D15] focus:border-[#8B5A2B] focus:outline-none" placeholder="예: 이사님, 대표"/>
                     </div>
                   </div>
 
