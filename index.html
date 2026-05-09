@@ -83,13 +83,6 @@
     };
     const SUBITEM_COLOR_ORDER = Object.keys(SUBITEM_AMOUNT_COLORS);
 
-    const BLOCK_CATEGORIES = {
-      major: { label: '대분류', icon: 'ph-fill ph-folder-simple-star', chip: 'bg-[#FDF6E9] text-[#8B5A2B] border-[#D2B48C]' },
-      middle: { label: '중분류', icon: 'ph-fill ph-folder-simple', chip: 'bg-[#EEF6FF] text-[#0277BD] border-[#B3E5FC]' },
-      small: { label: '소분류', icon: 'ph-fill ph-list-bullets', chip: 'bg-[#EBF5EC] text-[#2E7D32] border-[#C8E6C9]' },
-    };
-    const BLOCK_CATEGORY_ORDER = ['major', 'middle', 'small'];
-
     const DEFAULT_CARD_HOLDERS = {
       main: '대표',
       jecheon1: '이사님',
@@ -191,6 +184,12 @@
         }
         return getAmountValue(item);
       };
+      const getBlockAmount = (item) => {
+        if (item && item.subItems && item.subItems.length > 0) {
+          return item.subItems.reduce((sum, sub) => sum + getSubItemAmount(sub), 0);
+        }
+        return getAmountValue(item);
+      };
       const getEffectiveAmount = (item) => {
         if (!item || item.isPlanned) return 0;
         if (item.subItems && item.subItems.length > 0) {
@@ -207,11 +206,22 @@
         const text = (account && (account.cardHolder || DEFAULT_CARD_HOLDERS[account.id])) || '';
         return text.split(/[,，\/|]+/).map(name => name.trim()).filter(Boolean);
       };
-      const normalizeSubItem = (item) => ({
-        ...item,
-        amountColor: item.amountColor || 'auto',
-        childItems: item.childItems ? item.childItems.map(child => ({ ...child, amountColor: child.amountColor || 'auto' })) : []
-      });
+      const normalizeSubItem = (item) => {
+        const childItems = item.childItems ? item.childItems.map(child => ({ ...child, amountColor: child.amountColor || 'auto' })) : [];
+        const childTotal = childItems.reduce((sum, child) => sum + getAmountValue(child), 0);
+        return {
+          ...item,
+          amount: childItems.length > 0 ? childTotal : getAmountValue(item),
+          amountString: childItems.length > 0 ? String(childTotal) : item.amountString,
+          amountColor: item.amountColor || 'auto',
+          childItems
+        };
+      };
+      const normalizeBlock = (block) => {
+        const subItems = block.subItems ? block.subItems.map(item => normalizeSubItem(item)) : [];
+        const amount = subItems.length > 0 ? subItems.reduce((sum, item) => sum + getSubItemAmount(item), 0) : getAmountValue(block);
+        return { ...block, amount, subItems };
+      };
       const updateModalSubItems = (prev, newSubItems) => {
         const newTotalAmount = newSubItems.reduce((sum, item) => sum + getSubItemAmount(item), 0);
         return { ...prev, amountInput: formatCurrency(newTotalAmount), blockData: { ...prev.blockData, subItems: newSubItems, amount: newTotalAmount } };
@@ -236,8 +246,8 @@
           })
           .then(data => {
             if (data && Object.keys(data).length > 0) {
-              if (data.accountsData) setAccountsData(data.accountsData);
-              if (data.blocks) setBlocks(data.blocks);
+              if (Array.isArray(data.accountsData)) setAccountsData(data.accountsData);
+              if (Array.isArray(data.blocks)) setBlocks(data.blocks.map(block => normalizeBlock(block)));
               if (data.lastSavedAt) setLastSavedAt(data.lastSavedAt);
             }
             setIsInitialLoading(false);
@@ -256,10 +266,10 @@
         if (!GAS_URL || GAS_URL.includes("여기에")) {
           return alert("구글 스크립트 웹앱 URL이 입력되지 않았습니다!");
         }
-        setIsSyncing(true);
-        try {
-          const savedAt = new Date().toISOString();
-          const payload = { accountsData, blocks, lastSavedAt: savedAt };
+          setIsSyncing(true);
+          try {
+            const savedAt = new Date().toISOString();
+            const payload = { accountsData, blocks: blocks.map(block => normalizeBlock(block)), lastSavedAt: savedAt };
           await fetch(GAS_URL, {
             method: "POST",
             headers: { "Content-Type": "text/plain;charset=utf-8" },
@@ -324,7 +334,9 @@
         if (!draggedBlockId || draggedBlockId === targetBlockId) return;
 
         setBlocks(prev => {
-          const source = prev.find(b => b.id === draggedBlockId);
+          const rawSource = prev.find(b => b.id === draggedBlockId);
+          if (!rawSource) return prev;
+          const source = normalizeBlock(rawSource);
           const newBlocks = prev.filter(b => b.id !== draggedBlockId);
           return newBlocks.map(b => {
             if (b.id === targetBlockId) {
@@ -335,7 +347,7 @@
               newSubItems.push({
                 id: `s_${Date.now()}_2`,
                 label: source.label,
-                amount: source.amount,
+                amount: getBlockAmount(source),
                 isPlanned: !!source.isPlanned,
                 amountColor: 'auto',
                 childItems: source.subItems ? source.subItems.map(item => ({ id: `c_${Date.now()}_${item.id}`, label: item.label, amount: getSubItemAmount(item), amountColor: item.amountColor || 'auto' })) : []
@@ -381,7 +393,7 @@
       /* --- 금액 나누기 (Split) --- */
       const openSplitModal = (block) => {
         if (block.subItems && block.subItems.length > 0) {
-          return alert("소분류가 포함된 박스는 한 번에 나눌 수 없습니다.\n먼저 소분류 내역을 밖으로 꺼낸(분리) 뒤 진행해 주세요.");
+          return alert("중분류가 포함된 박스는 한 번에 나눌 수 없습니다.\n먼저 중분류 내역을 밖으로 꺼낸(분리) 뒤 진행해 주세요.");
         }
         setSplitModal({ isOpen: true, block, amountInput: '' });
       };
@@ -426,7 +438,7 @@
         setSplitModal({ isOpen: false, block: null, amountInput: '' });
       };
 
-      /* --- 소분류 밖으로 꺼내기 --- */
+      /* --- 중분류 밖으로 꺼내기 --- */
       const extractSubItem = (parentId, subItemId) => {
         setBlocks(prev => {
           const parent = prev.find(b => b.id === parentId);
@@ -469,19 +481,22 @@
         const { accountId, monthLabel } = closeMonthModal;
         const accountBlocks = blocks.filter(b => b.accountId === accountId);
         
-        const blocksSnapshot = accountBlocks.map(b => ({
-          id: `snap_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-          label: b.label,
-          amount: b.amount,
-          color: b.color || 'none',
-          isPlanned: !!b.isPlanned,
-          subItems: b.subItems ? b.subItems.map(item => normalizeSubItem(item)) : []
-        }));
+        const blocksSnapshot = accountBlocks.map(b => {
+          const normalizedBlock = normalizeBlock(b);
+          return {
+            id: `snap_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+            label: normalizedBlock.label,
+            amount: normalizedBlock.amount,
+            color: normalizedBlock.color || 'none',
+            isPlanned: !!normalizedBlock.isPlanned,
+            subItems: normalizedBlock.subItems
+          };
+        });
 
         setAccountsData(prev => prev.map(acc => {
           if (acc.id === accountId) {
             const newReport = { id: `rep_${Date.now()}`, month: monthLabel, blocks: blocksSnapshot };
-            return { ...acc, reportData: [newReport, ...acc.reportData] };
+            return { ...acc, reportData: [newReport, ...(acc.reportData || [])] };
           }
           return acc;
         }));
@@ -598,9 +613,8 @@
       };
       
       const openEditModal = (block) => {
-        const normalizedBlock = { isPlanned: false, subItems: [], ...block };
-        normalizedBlock.subItems = normalizedBlock.subItems.map(item => normalizeSubItem(item));
-        setModal({ isOpen: true, mode: 'edit', amountInput: block.amount === 0 ? '' : formatCurrency(block.amount), blockData: normalizedBlock });
+        const normalizedBlock = normalizeBlock({ isPlanned: false, subItems: [], ...block });
+        setModal({ isOpen: true, mode: 'edit', amountInput: normalizedBlock.amount === 0 ? '' : formatCurrency(normalizedBlock.amount), blockData: normalizedBlock });
       };
       
       const closeModals = () => {
@@ -743,8 +757,9 @@
 
       const saveBlock = (e) => {
         e.preventDefault();
-        if (modal.mode === 'create') setBlocks(prev => [...prev, modal.blockData]);
-        else setBlocks(prev => prev.map(b => b.id === modal.blockData.id ? modal.blockData : b));
+        const blockToSave = normalizeBlock(modal.blockData);
+        if (modal.mode === 'create') setBlocks(prev => [...prev, blockToSave]);
+        else setBlocks(prev => prev.map(b => b.id === blockToSave.id ? blockToSave : b));
         closeModals();
       };
 
@@ -870,6 +885,7 @@
                           const isMergeTarget = mergeTargetId === block.id;
                           const tagColor = COLOR_TAGS[block.color || 'none'];
                           const hasSubItems = block.subItems && block.subItems.length > 0;
+                          const blockAmount = getBlockAmount(block);
                           const isPlanned = !!block.isPlanned;
                           const isSubItemsCollapsed = collapsedSubItems.includes(block.id);
                            
@@ -906,13 +922,14 @@
                                 
                                 <div className="flex-1 min-w-0 pr-1">
                                   <div className="flex items-center gap-2 mb-0.5">
+                                    <span className="shrink-0 text-[9px] font-black px-1 py-0.5 rounded bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">대</span>
                                     <p className="truncate text-[13px] text-[#2A1D15] font-extrabold leading-tight">{block.label}</p>
                                     {isPlanned && (
                                       <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>
                                     )}
                                   </div>
-                                  <p className={`font-mono text-[16px] font-black tracking-tight ${getAmountTextClass(block.amount, 'auto', isPlanned)}`}>
-                                    {block.amount > 0 ? '+' : ''}{formatCurrency(block.amount)}
+                                  <p className={`font-mono text-[16px] font-black tracking-tight ${getAmountTextClass(blockAmount, 'auto', isPlanned)}`}>
+                                    {blockAmount > 0 ? '+' : ''}{formatCurrency(blockAmount)}
                                   </p>
                                 </div>
 
@@ -954,7 +971,7 @@
                                     >
                                       <span className="text-[11px] font-extrabold flex items-center gap-1.5">
                                         <i className="ph-bold ph-list-bullets" style={{fontSize: 13}}></i>
-                                        세부항목 {block.subItems.length}개
+                                        중분류 {block.subItems.length}개
                                       </span>
                                       <span className="text-[10px] font-black text-[#8B5A2B] flex items-center gap-1">
                                         {isSubItemsCollapsed ? '펼치기' : '접기'}
@@ -964,27 +981,46 @@
 
                                     {!isSubItemsCollapsed && (
                                       <div className="space-y-1.5">
-                                        {block.subItems.map((sub, idx) => (
-                                          <div key={idx} className="flex justify-between items-center text-[11px] text-[#6D5443] font-medium group/sub">
-                                            <span className="truncate pr-2 flex items-center gap-1.5">
-                                              <span className="text-black/20">↳</span> {sub.label || '내용 없음'}
-                                            </span>
-                                            <div className="flex items-center gap-2">
-                                              <span className={`font-mono font-bold ${getAmountTextClass(sub.amount, sub.amountColor || 'auto', sub.isPlanned)}`}>
-                                                {sub.amount > 0 ? '+' : ''}{formatCurrency(sub.amount)}
-                                              </span>
-                                              {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
-                                              {/* 꺼내기 버튼 */}
-                                              <button 
-                                                onClick={(e) => { e.stopPropagation(); extractSubItem(block.id, sub.id); }}
-                                                className="opacity-0 group-hover/sub:opacity-100 p-1 bg-white border border-[#DFD8CE] text-[#8B5A2B] rounded hover:bg-[#F9F6F0] transition-opacity"
-                                                title="독립된 박스로 분리해서 밖으로 꺼내기"
-                                              >
-                                                <i className="ph-bold ph-export" style={{fontSize: 14}}></i>
-                                              </button>
+                                        {block.subItems.map((sub, idx) => {
+                                          const childItems = getChildItems(sub);
+                                          const subAmount = getSubItemAmount(sub);
+                                          return (
+                                            <div key={idx} className="rounded-lg border border-[#E6E0D4] bg-white/70 px-2 py-1.5 text-[11px] text-[#6D5443] font-medium group/sub">
+                                              <div className="flex justify-between items-center">
+                                                <span className="truncate pr-2 flex items-center gap-1.5">
+                                                  <span className="text-[9px] font-black px-1 py-0.5 rounded bg-[#EEF6FF] text-[#0277BD] border border-[#B3E5FC]">중</span> {sub.label || '내용 없음'}
+                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                  <span className={`font-mono font-bold ${getAmountTextClass(subAmount, sub.amountColor || 'auto', sub.isPlanned)}`}>
+                                                    {subAmount > 0 ? '+' : ''}{formatCurrency(subAmount)}
+                                                  </span>
+                                                  {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
+                                                  <button 
+                                                    onClick={(e) => { e.stopPropagation(); extractSubItem(block.id, sub.id); }}
+                                                    className="opacity-0 group-hover/sub:opacity-100 p-1 bg-white border border-[#DFD8CE] text-[#8B5A2B] rounded hover:bg-[#F9F6F0] transition-opacity"
+                                                    title="독립된 박스로 분리해서 밖으로 꺼내기"
+                                                  >
+                                                    <i className="ph-bold ph-export" style={{fontSize: 14}}></i>
+                                                  </button>
+                                                </div>
+                                              </div>
+                                              {childItems.length > 0 && (
+                                                <div className="mt-1.5 ml-4 space-y-1 border-l border-[#DFD8CE] pl-2">
+                                                  {childItems.map((child, childIdx) => (
+                                                    <div key={childIdx} className="flex justify-between items-center gap-2">
+                                                      <span className="truncate flex items-center gap-1.5">
+                                                        <span className="text-[9px] font-black px-1 py-0.5 rounded bg-[#EBF5EC] text-[#2E7D32] border border-[#C8E6C9]">소</span> {child.label || '소분류 없음'}
+                                                      </span>
+                                                      <span className={`font-mono font-bold ${getAmountTextClass(child.amount, child.amountColor || 'auto')}`}>
+                                                        {child.amount > 0 ? '+' : ''}{formatCurrency(child.amount)}
+                                                      </span>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              )}
                                             </div>
-                                          </div>
-                                        ))}
+                                          );
+                                        })}
                                       </div>
                                     )}
                                   </div>
@@ -997,7 +1033,6 @@
                                 </div>
                               )}
                             </div>
-                            </React.Fragment>
                           );
                         })
                       )}
@@ -1229,6 +1264,8 @@
                             {activeReport.blocks.map(block => {
                               const tagColor = COLOR_TAGS[block.color || 'none'];
                               const isPlanned = !!block.isPlanned;
+                              const hasSubItems = block.subItems && block.subItems.length > 0;
+                              const blockAmount = getBlockAmount(block);
                               return (
                                 <div key={block.id} className={`relative flex flex-col border rounded-xl shadow-sm hover:shadow-md transition-shadow group p-1 ${tagColor.bg} ${tagColor.border}`}>
                                   <div className="flex items-center gap-2 p-2">
@@ -1243,10 +1280,10 @@
                                         <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>
                                       )}
                                       <input 
-                                        type="text" value={block.amountString != null ? block.amountString : (block.amount === 0 ? '' : block.amount)}
-                                        readOnly={block.subItems && block.subItems.length > 0}
+                                        type="text" value={hasSubItems ? formatCurrency(blockAmount) : (block.amountString != null ? block.amountString : (block.amount === 0 ? '' : block.amount))}
+                                        readOnly={hasSubItems}
                                         onChange={(e) => handleReportBlockChange(activeReport.id, block.id, 'amount', e.target.value)}
-                                        className={`w-28 bg-transparent font-mono font-black text-right text-[15px] border-b border-transparent focus:border-[#DFD8CE] hover:border-black/10 px-1 py-1 focus:outline-none transition-colors ${getAmountTextClass(block.amount, 'auto', isPlanned)} ${(block.subItems && block.subItems.length > 0) ? 'opacity-60 cursor-not-allowed' : ''}`}
+                                        className={`w-28 bg-transparent font-mono font-black text-right text-[15px] border-b border-transparent focus:border-[#DFD8CE] hover:border-black/10 px-1 py-1 focus:outline-none transition-colors ${getAmountTextClass(blockAmount, 'auto', isPlanned)} ${hasSubItems ? 'opacity-60 cursor-not-allowed' : ''}`}
                                         placeholder="0"
                                       />
                                     </div>
@@ -1255,22 +1292,42 @@
                                     </button>
                                   </div>
 
-                                  {block.subItems && block.subItems.length > 0 && (
+                                  {hasSubItems && (
                                     <div className="px-3 pb-2 pt-0">
                                       <div className="border-t border-black/10 pt-2 space-y-1.5">
-                                        {block.subItems.map((sub, idx) => (
-                                          <div key={idx} className="flex justify-between items-center text-[11px] text-[#6D5443] font-medium">
-                                            <span className="truncate pr-2 flex items-center gap-1.5">
-                                              <span className="text-black/20">↳</span> {sub.label || '내용 없음'}
-                                            </span>
-                                            <div className="flex items-center gap-2">
-                                              <span className={`font-mono font-bold ${getAmountTextClass(sub.amount, sub.amountColor || 'auto', sub.isPlanned)}`}>
-                                                {sub.amount > 0 ? '+' : ''}{formatCurrency(sub.amount)}
-                                              </span>
-                                              {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
+                                        {block.subItems.map((sub, idx) => {
+                                          const childItems = getChildItems(sub);
+                                          const subAmount = getSubItemAmount(sub);
+                                          return (
+                                            <div key={idx} className="rounded-lg border border-[#E6E0D4] bg-white/70 px-2 py-1.5 text-[11px] text-[#6D5443] font-medium">
+                                              <div className="flex justify-between items-center">
+                                                <span className="truncate pr-2 flex items-center gap-1.5">
+                                                  <span className="text-[9px] font-black px-1 py-0.5 rounded bg-[#EEF6FF] text-[#0277BD] border border-[#B3E5FC]">중</span> {sub.label || '내용 없음'}
+                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                  <span className={`font-mono font-bold ${getAmountTextClass(subAmount, sub.amountColor || 'auto', sub.isPlanned)}`}>
+                                                    {subAmount > 0 ? '+' : ''}{formatCurrency(subAmount)}
+                                                  </span>
+                                                  {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
+                                                </div>
+                                              </div>
+                                              {childItems.length > 0 && (
+                                                <div className="mt-1.5 ml-4 space-y-1 border-l border-[#DFD8CE] pl-2">
+                                                  {childItems.map((child, childIdx) => (
+                                                    <div key={childIdx} className="flex justify-between items-center gap-2">
+                                                      <span className="truncate flex items-center gap-1.5">
+                                                        <span className="text-[9px] font-black px-1 py-0.5 rounded bg-[#EBF5EC] text-[#2E7D32] border border-[#C8E6C9]">소</span> {child.label || '소분류 없음'}
+                                                      </span>
+                                                      <span className={`font-mono font-bold ${getAmountTextClass(child.amount, child.amountColor || 'auto')}`}>
+                                                        {child.amount > 0 ? '+' : ''}{formatCurrency(child.amount)}
+                                                      </span>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              )}
                                             </div>
-                                          </div>
-                                        ))}
+                                          );
+                                        })}
                                       </div>
                                     </div>
                                   )}
@@ -1313,31 +1370,8 @@
                 <form onSubmit={saveBlock} className="p-6 max-h-[75vh] overflow-y-auto custom-scrollbar">
                   
                   <div className="mb-5">
-                    <label className="block text-xs font-extrabold text-[#6D5443] mb-2 uppercase">메인 항목명</label>
+                    <label className="block text-xs font-extrabold text-[#6D5443] mb-2 uppercase">대분류 박스 이름</label>
                     <input type="text" required value={modal.blockData.label} onChange={(e) => setModal(p => ({...p, blockData: {...p.blockData, label: e.target.value}}))} className="w-full border-2 border-[#E6E0D4] rounded-xl p-3 text-sm font-bold text-[#2A1D15] focus:outline-none focus:border-[#8B5A2B] transition-colors" placeholder="예: 건축주 입금액, 장비대금 등"/>
-                  </div>
-
-                  <div className="mb-6">
-                    <label className="block text-xs font-extrabold text-[#6D5443] mb-2 uppercase">자금박스 분류</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      {BLOCK_CATEGORY_ORDER.map(categoryKey => {
-                        const category = BLOCK_CATEGORIES[categoryKey];
-                        const isActiveCategory = getBlockCategory(modal.blockData) === categoryKey;
-                        return (
-                          <button
-                            key={categoryKey}
-                            type="button"
-                            onClick={() => setModal(p => ({...p, blockData: {...p.blockData, category: categoryKey}}))}
-                            className={`py-2 px-2 rounded-xl border-2 text-xs font-black flex items-center justify-center gap-1.5 transition-all
-                              ${isActiveCategory ? `${category.chip} ring-1 ring-[#8B5A2B]` : 'bg-white border-[#DFD8CE] text-[#6D5443] hover:bg-[#F9F6F0]'}
-                            `}
-                          >
-                            <i className={category.icon} style={{fontSize: 14}}></i>
-                            {category.label}
-                          </button>
-                        );
-                      })}
-                    </div>
                   </div>
 
                   <div className="mb-6">
@@ -1372,18 +1406,21 @@
 
                   <div className="mb-6 bg-[#FDFCFB] p-4 rounded-xl border border-[#E6E0D4]">
                     <div className="flex justify-between items-center mb-3">
-                      <label className="block text-xs font-extrabold text-[#6D5443] uppercase flex items-center gap-1.5"><i className="ph-bold ph-list-plus" style={{fontSize: 14}}></i> 상세 내역 (소분류)</label>
-                      <button type="button" onClick={addSubItem} className="text-[10px] bg-[#EFEBE4] text-[#8B5A2B] px-2 py-1 rounded font-bold hover:bg-[#DFD8CE] transition-colors">+ 행 추가</button>
+                      <label className="block text-xs font-extrabold text-[#6D5443] uppercase flex items-center gap-1.5"><i className="ph-bold ph-folder-simple" style={{fontSize: 14}}></i> 중분류 박스</label>
+                      <button type="button" onClick={addSubItem} className="text-[10px] bg-[#EFEBE4] text-[#8B5A2B] px-2 py-1 rounded font-bold hover:bg-[#DFD8CE] transition-colors">+ 중분류 추가</button>
                     </div>
                     
                     {modal.blockData.subItems && modal.blockData.subItems.length > 0 ? (
                       <div className="space-y-3 mb-3">
-                        {modal.blockData.subItems.map((sub, idx) => (
+                        {modal.blockData.subItems.map((sub, idx) => {
+                          const childItems = getChildItems(sub);
+                          const hasChildItems = childItems.length > 0;
+                          return (
                           <div key={sub.id} className="rounded-lg border border-[#E6E0D4] bg-white p-3 shadow-sm">
                             <div className="flex gap-2 items-start">
                               <div className="flex-1 space-y-2">
-                                <input type="text" value={sub.label} onChange={(e) => handleSubItemChange(sub.id, 'label', e.target.value)} placeholder="내용 (예: 장비대 지출)" className="w-full text-[11px] font-bold border border-[#DFD8CE] rounded p-2 focus:outline-none focus:border-[#8B5A2B]" required/>
-                                <input type="text" value={sub.amountString != null ? sub.amountString : (sub.amount === 0 ? '' : sub.amount)} onChange={(e) => handleSubItemChange(sub.id, 'amount', e.target.value)} placeholder="금액 (- 지출)" className={`w-full text-xs font-mono font-bold border border-[#DFD8CE] rounded p-2 text-right focus:outline-none focus:border-[#8B5A2B] ${getAmountTextClass(sub.amount, sub.amountColor || 'auto', sub.isPlanned)}`} required/>
+                                <input type="text" value={sub.label} onChange={(e) => handleSubItemChange(sub.id, 'label', e.target.value)} placeholder="중분류 이름 (예: 장비대)" className="w-full text-[11px] font-bold border border-[#DFD8CE] rounded p-2 focus:outline-none focus:border-[#8B5A2B]" required/>
+                                <input type="text" value={hasChildItems ? formatCurrency(getSubItemAmount(sub)) : (sub.amountString != null ? sub.amountString : (sub.amount === 0 ? '' : sub.amount))} onChange={(e) => handleSubItemChange(sub.id, 'amount', e.target.value)} readOnly={hasChildItems} placeholder="중분류 금액 (- 지출)" className={`w-full text-xs font-mono font-bold border border-[#DFD8CE] rounded p-2 text-right focus:outline-none focus:border-[#8B5A2B] ${hasChildItems ? 'bg-[#F9F6F0] cursor-not-allowed' : ''} ${getAmountTextClass(getSubItemAmount(sub), sub.amountColor || 'auto', sub.isPlanned)}`} required/>
                               </div>
                               <div className="flex flex-col gap-1">
                                 <button type="button" onClick={() => moveSubItem(sub.id, -1)} disabled={idx === 0} className={`p-1.5 border border-[#DFD8CE] rounded bg-white ${idx === 0 ? 'text-[#CFC7BC] cursor-not-allowed' : 'text-[#6D5443] hover:bg-[#F9F6F0]'}`} title="위로 이동">
@@ -1428,11 +1465,68 @@
                                 })}
                               </div>
                             </div>
+
+                            <div className="mt-3 pt-3 border-t border-[#EFEBE4] bg-[#FCFAF8] rounded-lg p-2">
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-[10px] font-extrabold text-[#6D5443] flex items-center gap-1.5">
+                                  <i className="ph-bold ph-list-bullets" style={{fontSize: 13}}></i> 소분류 박스
+                                </span>
+                                <button type="button" onClick={() => addChildItem(sub.id)} className="text-[10px] bg-white border border-[#DFD8CE] text-[#8B5A2B] px-2 py-1 rounded font-bold hover:bg-[#F9F6F0] transition-colors">+ 소분류 추가</button>
+                              </div>
+
+                              {childItems.length > 0 ? (
+                                <div className="space-y-2">
+                                  {childItems.map((child, childIdx) => (
+                                    <div key={child.id} className="rounded-md border border-[#DFD8CE] bg-white p-2">
+                                      <div className="flex gap-2 items-start">
+                                        <div className="flex-1 space-y-1.5">
+                                          <input type="text" value={child.label} onChange={(e) => handleChildItemChange(sub.id, child.id, 'label', e.target.value)} placeholder="소분류 이름" className="w-full text-[11px] font-bold border border-[#DFD8CE] rounded p-2 focus:outline-none focus:border-[#8B5A2B]" />
+                                          <input type="text" value={child.amountString != null ? child.amountString : (child.amount === 0 ? '' : child.amount)} onChange={(e) => handleChildItemChange(sub.id, child.id, 'amount', e.target.value)} placeholder="소분류 금액" className={`w-full text-xs font-mono font-bold border border-[#DFD8CE] rounded p-2 text-right focus:outline-none focus:border-[#8B5A2B] ${getAmountTextClass(child.amount, child.amountColor || 'auto')}`} />
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                          <button type="button" onClick={() => moveChildItem(sub.id, child.id, -1)} disabled={childIdx === 0} className={`p-1.5 border border-[#DFD8CE] rounded bg-white ${childIdx === 0 ? 'text-[#CFC7BC] cursor-not-allowed' : 'text-[#6D5443] hover:bg-[#F9F6F0]'}`} title="위로 이동">
+                                            <i className="ph-bold ph-arrow-up" style={{fontSize: 12}}></i>
+                                          </button>
+                                          <button type="button" onClick={() => moveChildItem(sub.id, child.id, 1)} disabled={childIdx === childItems.length - 1} className={`p-1.5 border border-[#DFD8CE] rounded bg-white ${childIdx === childItems.length - 1 ? 'text-[#CFC7BC] cursor-not-allowed' : 'text-[#6D5443] hover:bg-[#F9F6F0]'}`} title="아래로 이동">
+                                            <i className="ph-bold ph-arrow-down" style={{fontSize: 12}}></i>
+                                          </button>
+                                          <button type="button" onClick={() => removeChildItem(sub.id, child.id)} className="p-1.5 text-[#C62828] bg-white border border-[#DFD8CE] rounded hover:bg-[#FFEBEE]" title="삭제">
+                                            <i className="ph-bold ph-trash" style={{fontSize: 12}}></i>
+                                          </button>
+                                        </div>
+                                      </div>
+                                      <div className="flex flex-wrap gap-1 mt-2">
+                                        {SUBITEM_COLOR_ORDER.map(colorKey => {
+                                          const color = SUBITEM_AMOUNT_COLORS[colorKey];
+                                          const isActiveChildColor = (child.amountColor || 'auto') === colorKey;
+                                          return (
+                                            <button
+                                              key={colorKey}
+                                              type="button"
+                                              onClick={() => setChildItemColor(sub.id, child.id, colorKey)}
+                                              className={`px-2 py-1 rounded-full border text-[9px] font-extrabold flex items-center gap-1 transition-all
+                                                ${isActiveChildColor ? 'border-[#8B5A2B] bg-[#F9F6F0] text-[#3D2B1F] ring-1 ring-[#8B5A2B]' : 'border-[#DFD8CE] bg-white text-[#6D5443] hover:bg-[#F9F6F0]'}
+                                              `}
+                                            >
+                                              <span className={`w-2.5 h-2.5 rounded-full border border-black/10 ${color.swatch}`}></span>
+                                              {color.label}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-[10px] text-[#A69C8E] font-bold text-center py-2">이 중분류 안에 소분류 박스를 추가할 수 있습니다.</p>
+                              )}
+                            </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     ) : (
-                      <p className="text-[11px] text-[#A69C8E] font-medium text-center py-2">다른 박스를 이 위로 <strong>드래그 & 드롭</strong> 하시면<br/>자동으로 소분류로 합쳐집니다.</p>
+                      <p className="text-[11px] text-[#A69C8E] font-medium text-center py-2">다른 박스를 이 위로 <strong>드래그 & 드롭</strong> 하시면<br/>자동으로 중분류 박스로 합쳐집니다.</p>
                     )}
                   </div>
 
