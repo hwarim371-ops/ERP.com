@@ -183,10 +183,18 @@
         return `${date.getFullYear()}년 ${twoDigits(date.getMonth() + 1)}월 ${twoDigits(date.getDate())}일 ${twoDigits(date.getHours())}시 ${twoDigits(date.getMinutes())}분 데이터`;
       };
       const getAmountValue = (item) => Number(item && item.amount) || 0;
+      const getChildItems = (item) => (item && item.childItems) ? item.childItems : [];
+      const getSubItemAmount = (item) => {
+        const childItems = getChildItems(item);
+        if (childItems.length > 0) {
+          return childItems.reduce((sum, child) => sum + getAmountValue(child), 0);
+        }
+        return getAmountValue(item);
+      };
       const getEffectiveAmount = (item) => {
         if (!item || item.isPlanned) return 0;
         if (item.subItems && item.subItems.length > 0) {
-          return item.subItems.reduce((sum, sub) => sum + (sub.isPlanned ? 0 : getAmountValue(sub)), 0);
+          return item.subItems.reduce((sum, sub) => sum + (sub.isPlanned ? 0 : getSubItemAmount(sub)), 0);
         }
         return getAmountValue(item);
       };
@@ -199,8 +207,14 @@
         const text = (account && (account.cardHolder || DEFAULT_CARD_HOLDERS[account.id])) || '';
         return text.split(/[,，\/|]+/).map(name => name.trim()).filter(Boolean);
       };
-      const getBlockCategory = (block) => {
-        return block && BLOCK_CATEGORIES[block.category] ? block.category : 'middle';
+      const normalizeSubItem = (item) => ({
+        ...item,
+        amountColor: item.amountColor || 'auto',
+        childItems: item.childItems ? item.childItems.map(child => ({ ...child, amountColor: child.amountColor || 'auto' })) : []
+      });
+      const updateModalSubItems = (prev, newSubItems) => {
+        const newTotalAmount = newSubItems.reduce((sum, item) => sum + getSubItemAmount(item), 0);
+        return { ...prev, amountInput: formatCurrency(newTotalAmount), blockData: { ...prev.blockData, subItems: newSubItems, amount: newTotalAmount } };
       };
 
       // --- 🌐 클라우드 데이터 불러오기 (GET) ---
@@ -314,12 +328,19 @@
           const newBlocks = prev.filter(b => b.id !== draggedBlockId);
           return newBlocks.map(b => {
             if (b.id === targetBlockId) {
-              let newSubItems = b.subItems ? b.subItems.map(item => ({ ...item, isPlanned: !!b.isPlanned || !!item.isPlanned, amountColor: item.amountColor || 'auto' })) : [];
+              let newSubItems = b.subItems ? b.subItems.map(item => ({ ...normalizeSubItem(item), isPlanned: !!b.isPlanned || !!item.isPlanned })) : [];
               if (newSubItems.length === 0) {
-                newSubItems.push({ id: `s_${Date.now()}_1`, label: '기존 금액', amount: b.amount, isPlanned: !!b.isPlanned, amountColor: 'auto' });
+                newSubItems.push({ id: `s_${Date.now()}_1`, label: '기존 금액', amount: b.amount, isPlanned: !!b.isPlanned, amountColor: 'auto', childItems: [] });
               }
-              newSubItems.push({ id: `s_${Date.now()}_2`, label: source.label, amount: source.amount, isPlanned: !!source.isPlanned, amountColor: 'auto' });
-              const newTotal = newSubItems.reduce((sum, item) => sum + item.amount, 0);
+              newSubItems.push({
+                id: `s_${Date.now()}_2`,
+                label: source.label,
+                amount: source.amount,
+                isPlanned: !!source.isPlanned,
+                amountColor: 'auto',
+                childItems: source.subItems ? source.subItems.map(item => ({ id: `c_${Date.now()}_${item.id}`, label: item.label, amount: getSubItemAmount(item), amountColor: item.amountColor || 'auto' })) : []
+              });
+              const newTotal = newSubItems.reduce((sum, item) => sum + getSubItemAmount(item), 0);
               return { ...b, isPlanned: false, subItems: newSubItems, amount: newTotal };
             }
             return b;
@@ -396,7 +417,6 @@
             label: `${source.label} (분리됨)`,
             amount: splitVal,
             color: source.color,
-            category: getBlockCategory(source),
             isPlanned: !!source.isPlanned,
             subItems: []
           });
@@ -411,11 +431,12 @@
         setBlocks(prev => {
           const parent = prev.find(b => b.id === parentId);
           const subItem = parent.subItems.find(s => s.id === subItemId);
+          const subItemAmount = getSubItemAmount(subItem);
           
           const newBlocks = prev.map(b => {
             if (b.id === parentId) {
               const newSubs = b.subItems.filter(s => s.id !== subItemId);
-              const newAmt = newSubs.length > 0 ? newSubs.reduce((sum, item) => sum + item.amount, 0) : (b.amount - subItem.amount);
+              const newAmt = newSubs.length > 0 ? newSubs.reduce((sum, item) => sum + getSubItemAmount(item), 0) : (b.amount - subItemAmount);
               return { ...b, subItems: newSubs, amount: newAmt };
             }
             return b;
@@ -426,11 +447,10 @@
             id: `b_${Date.now()}_ext`,
             accountId: parent.accountId,
             label: subItem.label,
-            amount: subItem.amount,
+            amount: subItemAmount,
             color: parent.color || 'none',
-            category: getBlockCategory(parent),
             isPlanned: !!subItem.isPlanned,
-            subItems: []
+            subItems: getChildItems(subItem).map(child => ({ ...child, childItems: [] }))
           });
 
           return newBlocks;
@@ -454,9 +474,8 @@
           label: b.label,
           amount: b.amount,
           color: b.color || 'none',
-          category: getBlockCategory(b),
           isPlanned: !!b.isPlanned,
-          subItems: b.subItems ? [...b.subItems] : []
+          subItems: b.subItems ? b.subItems.map(item => normalizeSubItem(item)) : []
         }));
 
         setAccountsData(prev => prev.map(acc => {
@@ -510,7 +529,7 @@
                 if (rep.id === reportId) {
                   return {
                     ...rep,
-                    blocks: [...rep.blocks, { id: `snap_${Date.now()}`, label: '', amount: 0, amountString: '', color: 'none', category: 'middle', isPlanned: false, subItems: [] }]
+                    blocks: [...rep.blocks, { id: `snap_${Date.now()}`, label: '', amount: 0, amountString: '', color: 'none', isPlanned: false, subItems: [] }]
                   };
                 }
                 return rep;
@@ -575,11 +594,13 @@
 
       /* --- 메인 블록 생성/수정 --- */
       const openCreateModal = (accountId) => {
-        setModal({ isOpen: true, mode: 'create', amountInput: '', blockData: { id: Date.now().toString(), accountId, label: '새 내역', amount: 0, color: 'none', category: 'middle', isPlanned: false, subItems: [] } });
+        setModal({ isOpen: true, mode: 'create', amountInput: '', blockData: { id: Date.now().toString(), accountId, label: '새 내역', amount: 0, color: 'none', isPlanned: false, subItems: [] } });
       };
       
       const openEditModal = (block) => {
-        setModal({ isOpen: true, mode: 'edit', amountInput: block.amount === 0 ? '' : formatCurrency(block.amount), blockData: { category: 'middle', isPlanned: false, subItems: [], ...block } });
+        const normalizedBlock = { isPlanned: false, subItems: [], ...block };
+        normalizedBlock.subItems = normalizedBlock.subItems.map(item => normalizeSubItem(item));
+        setModal({ isOpen: true, mode: 'edit', amountInput: block.amount === 0 ? '' : formatCurrency(block.amount), blockData: normalizedBlock });
       };
       
       const closeModals = () => {
@@ -603,6 +624,7 @@
           const newSubItems = prev.blockData.subItems.map(item => {
             if (item.id === id) {
               if (field === 'amount') {
+                if (getChildItems(item).length > 0) return item;
                 let val = value.replace(/[^0-9-]/g, '');
                 if (val.lastIndexOf('-') > 0) val = val.replace(/-/g, '').replace(/^/, '-');
                 return { ...item, amountString: val, amount: parseInt(val, 10) || 0 };
@@ -611,17 +633,15 @@
             }
             return item;
           });
-          const newTotalAmount = newSubItems.reduce((sum, item) => sum + item.amount, 0);
-          return { ...prev, amountInput: formatCurrency(newTotalAmount), blockData: { ...prev.blockData, subItems: newSubItems, amount: newTotalAmount } };
+          return updateModalSubItems(prev, newSubItems);
         });
       };
 
-      const addSubItem = () => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: [...(prev.blockData.subItems || []), { id: Date.now().toString(), label: '', amount: 0, amountString: '', amountColor: 'auto', isPlanned: false }] } }));
+      const addSubItem = () => setModal(prev => updateModalSubItems(prev, [...(prev.blockData.subItems || []), { id: Date.now().toString(), label: '', amount: 0, amountString: '', amountColor: 'auto', isPlanned: false, childItems: [] }]));
       
       const removeSubItem = (id) => setModal(prev => {
         const newSubItems = prev.blockData.subItems.filter(item => item.id !== id);
-        const newTotalAmount = newSubItems.length > 0 ? newSubItems.reduce((sum, item) => sum + item.amount, 0) : prev.blockData.amount;
-        return { ...prev, amountInput: formatCurrency(newTotalAmount), blockData: { ...prev.blockData, subItems: newSubItems, amount: newTotalAmount } };
+        return updateModalSubItems(prev, newSubItems);
       });
 
       const moveSubItem = (id, direction) => setModal(prev => {
@@ -639,6 +659,72 @@
         const newSubItems = prev.blockData.subItems.map(item => {
           if (item.id !== id) return item;
           return { ...item, amountColor: colorKey };
+        });
+        return { ...prev, blockData: { ...prev.blockData, subItems: newSubItems } };
+      });
+
+      const addChildItem = (subItemId) => setModal(prev => {
+        const newSubItems = prev.blockData.subItems.map(item => {
+          if (item.id !== subItemId) return item;
+          let childItems = getChildItems(item).map(child => ({ ...child }));
+          if (childItems.length === 0 && getAmountValue(item) !== 0) {
+            childItems.push({ id: `c_${Date.now()}_base`, label: '기존 금액', amount: item.amount, amountString: String(item.amount), amountColor: item.amountColor || 'auto' });
+          }
+          childItems.push({ id: `c_${Date.now()}`, label: '', amount: 0, amountString: '', amountColor: 'auto' });
+          const newAmount = childItems.reduce((sum, child) => sum + getAmountValue(child), 0);
+          return { ...item, childItems, amount: newAmount, amountString: String(newAmount) };
+        });
+        return updateModalSubItems(prev, newSubItems);
+      });
+
+      const handleChildItemChange = (subItemId, childId, field, value) => setModal(prev => {
+        const newSubItems = prev.blockData.subItems.map(item => {
+          if (item.id !== subItemId) return item;
+          const childItems = getChildItems(item).map(child => {
+            if (child.id !== childId) return child;
+            if (field === 'amount') {
+              let val = value.replace(/[^0-9-]/g, '');
+              if (val.lastIndexOf('-') > 0) val = val.replace(/-/g, '').replace(/^/, '-');
+              return { ...child, amountString: val, amount: parseInt(val, 10) || 0 };
+            }
+            return { ...child, [field]: value };
+          });
+          const newAmount = childItems.reduce((sum, child) => sum + getAmountValue(child), 0);
+          return { ...item, childItems, amount: newAmount, amountString: String(newAmount) };
+        });
+        return updateModalSubItems(prev, newSubItems);
+      });
+
+      const removeChildItem = (subItemId, childId) => setModal(prev => {
+        const newSubItems = prev.blockData.subItems.map(item => {
+          if (item.id !== subItemId) return item;
+          const childItems = getChildItems(item).filter(child => child.id !== childId);
+          const newAmount = childItems.reduce((sum, child) => sum + getAmountValue(child), 0);
+          return { ...item, childItems, amount: newAmount, amountString: String(newAmount) };
+        });
+        return updateModalSubItems(prev, newSubItems);
+      });
+
+      const moveChildItem = (subItemId, childId, direction) => setModal(prev => {
+        const newSubItems = prev.blockData.subItems.map(item => {
+          if (item.id !== subItemId) return item;
+          const childItems = getChildItems(item).map(child => ({ ...child }));
+          const currentIndex = childItems.findIndex(child => child.id === childId);
+          const targetIndex = currentIndex + direction;
+          if (currentIndex < 0 || targetIndex < 0 || targetIndex >= childItems.length) return item;
+          const currentItem = childItems[currentIndex];
+          childItems[currentIndex] = childItems[targetIndex];
+          childItems[targetIndex] = currentItem;
+          return { ...item, childItems };
+        });
+        return updateModalSubItems(prev, newSubItems);
+      });
+
+      const setChildItemColor = (subItemId, childId, colorKey) => setModal(prev => {
+        const newSubItems = prev.blockData.subItems.map(item => {
+          if (item.id !== subItemId) return item;
+          const childItems = getChildItems(item).map(child => child.id === childId ? { ...child, amountColor: colorKey } : child);
+          return { ...item, childItems };
         });
         return { ...prev, blockData: { ...prev.blockData, subItems: newSubItems } };
       });
@@ -779,33 +865,17 @@
                           내역이 없습니다.
                         </div>
                       ) : (
-                        accountBlocks
-                          .slice()
-                          .sort((a, b) => BLOCK_CATEGORY_ORDER.indexOf(getBlockCategory(a)) - BLOCK_CATEGORY_ORDER.indexOf(getBlockCategory(b)))
-                          .map((block, idx, orderedBlocks) => {
+                        accountBlocks.map(block => {
                           const isSelected = selectedBlocks.includes(block.id);
                           const isMergeTarget = mergeTargetId === block.id;
                           const tagColor = COLOR_TAGS[block.color || 'none'];
                           const hasSubItems = block.subItems && block.subItems.length > 0;
                           const isPlanned = !!block.isPlanned;
                           const isSubItemsCollapsed = collapsedSubItems.includes(block.id);
-                          const blockCategoryKey = getBlockCategory(block);
-                          const blockCategory = BLOCK_CATEGORIES[blockCategoryKey];
-                          const prevCategoryKey = idx > 0 ? getBlockCategory(orderedBlocks[idx - 1]) : null;
-                          const showCategoryHeader = idx === 0 || blockCategoryKey !== prevCategoryKey;
                            
                           return (
-                            <React.Fragment key={block.id}>
-                              {showCategoryHeader && (
-                                <div className={`mt-1 mb-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-black flex items-center justify-between ${blockCategory.chip}`}>
-                                  <span className="flex items-center gap-1.5">
-                                    <i className={blockCategory.icon} style={{fontSize: 13}}></i>
-                                    {blockCategory.label}
-                                  </span>
-                                  <span>{orderedBlocks.filter(item => getBlockCategory(item) === blockCategoryKey).length}개</span>
-                                </div>
-                              )}
                               <div
+                              key={block.id}
                               draggable
                               onDragStart={(e) => handleDragStart(e, block.id)}
                               onDragEnd={handleDragEnd}
@@ -837,7 +907,6 @@
                                 <div className="flex-1 min-w-0 pr-1">
                                   <div className="flex items-center gap-2 mb-0.5">
                                     <p className="truncate text-[13px] text-[#2A1D15] font-extrabold leading-tight">{block.label}</p>
-                                    <span className={`shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-md border ${blockCategory.chip}`}>{blockCategory.label}</span>
                                     {isPlanned && (
                                       <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>
                                     )}
