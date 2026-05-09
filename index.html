@@ -168,6 +168,8 @@
       const [collapsedSubItems, setCollapsedSubItems] = useState([]);
       const [draggedModalSubItemId, setDraggedModalSubItemId] = useState(null);
       const [draggedModalChild, setDraggedModalChild] = useState(null);
+      const [draggedBoardSubItem, setDraggedBoardSubItem] = useState(null);
+      const [draggedBoardChild, setDraggedBoardChild] = useState(null);
 
       const formatCurrency = (amount) => new Intl.NumberFormat('ko-KR').format(amount || 0);
       const twoDigits = (value) => String(value).padStart(2, '0');
@@ -869,6 +871,183 @@
         return { ...prev, blockData: { ...prev.blockData, subItems: newSubItems } };
       });
 
+      const rebuildBlockWithSubItems = (block, subItems) => {
+        const normalizedSubItems = subItems.map(item => normalizeSubItem(item));
+        const amount = normalizedSubItems.length > 0 ? normalizedSubItems.reduce((sum, item) => sum + getSubItemAmount(item), 0) : 0;
+        return { ...block, subItems: normalizedSubItems, amount };
+      };
+
+      const handleBoardSubItemDragStart = (e, blockId, subItemId) => {
+        e.stopPropagation();
+        setDraggedBoardSubItem({ blockId, subItemId });
+        setDraggedBoardChild(null);
+        setDraggedBlockId(null);
+        setMergeTargetId(null);
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', subItemId);
+        }
+      };
+
+      const handleBoardSubItemDragOver = (e) => {
+        if (!draggedBoardSubItem) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      };
+
+      const moveBoardSubItemTo = (targetBlockId, targetSubItemId) => {
+        if (!draggedBoardSubItem) return;
+        if (draggedBoardSubItem.blockId === targetBlockId && draggedBoardSubItem.subItemId === targetSubItemId) {
+          setDraggedBoardSubItem(null);
+          return;
+        }
+
+        setBlocks(prev => {
+          let movedSubItem = null;
+          let nextBlocks = prev.map(block => {
+            if (block.id !== draggedBoardSubItem.blockId) return block;
+            const subItems = (block.subItems || []).filter(item => {
+              if (item.id === draggedBoardSubItem.subItemId) {
+                movedSubItem = normalizeSubItem(item);
+                return false;
+              }
+              return true;
+            });
+            return rebuildBlockWithSubItems(block, subItems);
+          });
+
+          if (!movedSubItem) return prev;
+
+          nextBlocks = nextBlocks.map(block => {
+            if (block.id !== targetBlockId) return block;
+            const subItems = (block.subItems || []).map(item => normalizeSubItem(item));
+            let insertIndex = targetSubItemId ? subItems.findIndex(item => item.id === targetSubItemId) : subItems.length;
+            if (insertIndex < 0) insertIndex = subItems.length;
+            subItems.splice(insertIndex, 0, movedSubItem);
+            return rebuildBlockWithSubItems(block, subItems);
+          });
+
+          return nextBlocks;
+        });
+        setDraggedBoardSubItem(null);
+      };
+
+      const handleBoardSubItemDrop = (e, targetBlockId, targetSubItemId) => {
+        if (!draggedBoardSubItem) return;
+        e.preventDefault();
+        e.stopPropagation();
+        moveBoardSubItemTo(targetBlockId, targetSubItemId);
+      };
+
+      const handleBoardSubItemDropOnBlock = (e, targetBlockId) => {
+        if (!draggedBoardSubItem) return;
+        e.preventDefault();
+        e.stopPropagation();
+        moveBoardSubItemTo(targetBlockId, null);
+      };
+
+      const handleBoardSubItemDragEnd = () => {
+        setDraggedBoardSubItem(null);
+      };
+
+      const handleBoardChildDragStart = (e, blockId, subItemId, childId) => {
+        e.stopPropagation();
+        setDraggedBoardChild({ blockId, subItemId, childId });
+        setDraggedBoardSubItem(null);
+        setDraggedBlockId(null);
+        setMergeTargetId(null);
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', childId);
+        }
+      };
+
+      const handleBoardChildDragOver = (e) => {
+        if (!draggedBoardChild) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      };
+
+      const moveBoardChildTo = (targetBlockId, targetSubItemId, targetChildId) => {
+        if (!draggedBoardChild) return;
+        if (
+          draggedBoardChild.blockId === targetBlockId &&
+          draggedBoardChild.subItemId === targetSubItemId &&
+          draggedBoardChild.childId === targetChildId
+        ) {
+          setDraggedBoardChild(null);
+          return;
+        }
+
+        setBlocks(prev => {
+          let movedChild = null;
+          let nextBlocks = prev.map(block => {
+            if (block.id !== draggedBoardChild.blockId) return block;
+            const subItems = (block.subItems || []).map(item => {
+              const normalizedItem = normalizeSubItem(item);
+              if (normalizedItem.id !== draggedBoardChild.subItemId) return normalizedItem;
+              const childItems = getChildItems(normalizedItem).filter(child => {
+                if (child.id === draggedBoardChild.childId) {
+                  movedChild = { ...child };
+                  return false;
+                }
+                return true;
+              });
+              return recalcSubItem(normalizedItem, childItems);
+            });
+            return rebuildBlockWithSubItems(block, subItems);
+          });
+
+          if (!movedChild) return prev;
+
+          nextBlocks = nextBlocks.map(block => {
+            if (block.id !== targetBlockId) return block;
+            const subItems = (block.subItems || []).map(item => {
+              const normalizedItem = normalizeSubItem(item);
+              if (normalizedItem.id !== targetSubItemId) return normalizedItem;
+              let childItems = getChildItems(normalizedItem).map(child => ({ ...child }));
+              if (childItems.length === 0 && getAmountValue(normalizedItem) !== 0) {
+                childItems.push({
+                  id: `c_${Date.now()}_base_${normalizedItem.id}`,
+                  label: '기존 금액',
+                  amount: normalizedItem.amount,
+                  amountString: String(normalizedItem.amount),
+                  amountColor: normalizedItem.amountColor || 'auto'
+                });
+              }
+              let insertIndex = targetChildId ? childItems.findIndex(child => child.id === targetChildId) : childItems.length;
+              if (insertIndex < 0) insertIndex = childItems.length;
+              childItems.splice(insertIndex, 0, movedChild);
+              return recalcSubItem(normalizedItem, childItems);
+            });
+            return rebuildBlockWithSubItems(block, subItems);
+          });
+
+          return nextBlocks;
+        });
+        setDraggedBoardChild(null);
+      };
+
+      const handleBoardChildDropOnSubItem = (e, targetBlockId, targetSubItemId) => {
+        if (!draggedBoardChild) return;
+        e.preventDefault();
+        e.stopPropagation();
+        moveBoardChildTo(targetBlockId, targetSubItemId, null);
+      };
+
+      const handleBoardChildDropOnChild = (e, targetBlockId, targetSubItemId, targetChildId) => {
+        if (!draggedBoardChild) return;
+        e.preventDefault();
+        e.stopPropagation();
+        moveBoardChildTo(targetBlockId, targetSubItemId, targetChildId);
+      };
+
+      const handleBoardChildDragEnd = () => {
+        setDraggedBoardChild(null);
+      };
+
       const toggleModalPlanned = () => {
         setModal(prev => ({ ...prev, blockData: { ...prev.blockData, isPlanned: !prev.blockData.isPlanned } }));
       };
@@ -1106,14 +1285,35 @@
                                     </button>
 
                                     {!isSubItemsCollapsed && (
-                                      <div className="space-y-1.5">
+                                      <div
+                                        onDragOver={handleBoardSubItemDragOver}
+                                        onDrop={(e) => handleBoardSubItemDropOnBlock(e, block.id)}
+                                        className="space-y-1.5"
+                                      >
                                         {block.subItems.map((sub, idx) => {
                                           const childItems = getChildItems(sub);
                                           const subAmount = getSubItemAmount(sub);
                                           return (
-                                            <div key={idx} className="rounded-lg border border-[#E6E0D4] bg-white/70 px-2 py-1.5 text-[11px] text-[#6D5443] font-medium group/sub">
+                                            <div
+                                              key={sub.id || idx}
+                                              onDragOver={(e) => { handleBoardSubItemDragOver(e); handleBoardChildDragOver(e); }}
+                                              onDrop={(e) => {
+                                                if (draggedBoardChild) handleBoardChildDropOnSubItem(e, block.id, sub.id);
+                                                else handleBoardSubItemDrop(e, block.id, sub.id);
+                                              }}
+                                              className={`rounded-lg border border-[#E6E0D4] bg-white/70 px-2 py-1.5 text-[11px] text-[#6D5443] font-medium group/sub transition-all ${draggedBoardSubItem && draggedBoardSubItem.subItemId === sub.id ? 'opacity-60 ring-2 ring-[#8B5A2B]' : ''} ${draggedBoardChild ? 'ring-1 ring-[#D2B48C]' : ''}`}
+                                            >
                                               <div className="flex justify-between items-center">
                                                 <span className="truncate pr-2 flex items-center gap-1.5">
+                                                  <span
+                                                    draggable
+                                                    onDragStart={(e) => handleBoardSubItemDragStart(e, block.id, sub.id)}
+                                                    onDragEnd={handleBoardSubItemDragEnd}
+                                                    className="no-select-trigger p-0.5 rounded text-[#A69C8E] hover:text-[#8B5A2B] cursor-grab active:cursor-grabbing"
+                                                    title="중분류를 드래그해서 이동"
+                                                  >
+                                                    <i className="ph-bold ph-dots-six-vertical" style={{fontSize: 12}}></i>
+                                                  </span>
                                                   <span className="text-[9px] font-black px-1 py-0.5 rounded bg-[#EEF6FF] text-[#0277BD] border border-[#B3E5FC]">중</span> {sub.label || '내용 없음'}
                                                 </span>
                                                 <div className="flex items-center gap-2">
@@ -1131,10 +1331,28 @@
                                                 </div>
                                               </div>
                                               {childItems.length > 0 && (
-                                                <div className="mt-1.5 ml-4 space-y-1 border-l border-[#DFD8CE] pl-2">
+                                                <div
+                                                  onDragOver={handleBoardChildDragOver}
+                                                  onDrop={(e) => handleBoardChildDropOnSubItem(e, block.id, sub.id)}
+                                                  className="mt-1.5 ml-4 space-y-1 border-l border-[#DFD8CE] pl-2"
+                                                >
                                                   {childItems.map((child, childIdx) => (
-                                                    <div key={childIdx} className="flex justify-between items-center gap-2">
+                                                    <div
+                                                      key={child.id || childIdx}
+                                                      onDragOver={handleBoardChildDragOver}
+                                                      onDrop={(e) => handleBoardChildDropOnChild(e, block.id, sub.id, child.id)}
+                                                      className={`flex justify-between items-center gap-2 rounded px-1 transition-all ${draggedBoardChild && draggedBoardChild.childId === child.id ? 'opacity-60 ring-1 ring-[#8B5A2B]' : ''}`}
+                                                    >
                                                       <span className="truncate flex items-center gap-1.5">
+                                                        <span
+                                                          draggable
+                                                          onDragStart={(e) => handleBoardChildDragStart(e, block.id, sub.id, child.id)}
+                                                          onDragEnd={handleBoardChildDragEnd}
+                                                          className="no-select-trigger p-0.5 rounded text-[#A69C8E] hover:text-[#8B5A2B] cursor-grab active:cursor-grabbing"
+                                                          title="소분류를 드래그해서 이동"
+                                                        >
+                                                          <i className="ph-bold ph-dots-six-vertical" style={{fontSize: 11}}></i>
+                                                        </span>
                                                         <span className="text-[9px] font-black px-1 py-0.5 rounded bg-[#EBF5EC] text-[#2E7D32] border border-[#C8E6C9]">소</span> {child.label || '소분류 없음'}
                                                       </span>
                                                       <span className={`font-mono font-bold ${getAmountTextClass(child.amount, child.amountColor || 'auto')}`}>
