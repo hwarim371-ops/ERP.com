@@ -5,31 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>화림 ERP</title>
   
-  <!-- 오류 자동 감지 스크립트 -->
   <script>
     window.addEventListener('error', function(event) {
-      if (event.message === 'Script error.') {
-        console.warn('외부 스크립트 오류가 감지되었지만 앱 화면은 계속 표시합니다.', event);
-        return;
-      }
+      if (event.message === 'Script error.') return;
       const errorDiv = document.createElement('div');
       errorDiv.style.cssText = 'position:fixed; top:0; left:0; width:100%; background:#C62828; color:white; padding:15px; z-index:9999; font-weight:bold; font-family:sans-serif; box-shadow:0 4px 6px rgba(0,0,0,0.3);';
-      errorDiv.innerHTML = '🚨 앱 실행 오류 발생: <br/><br/>' + event.message + '<br/><br/>위치: ' + (event.filename || '앱 내부') + ':' + (event.lineno || '-') + '<br/><br/>👉 코드가 잘못 복사되었거나 외부 라이브러리 로딩이 막혔는지 확인해 주세요!';
+      errorDiv.innerHTML = '🚨 앱 실행 오류 발생: <br/><br/>' + event.message + '<br/><br/>위치: ' + (event.filename || '앱 내부') + ':' + (event.lineno || '-');
       document.body.prepend(errorDiv);
     });
   </script>
 
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-  
   <!-- Phosphor Icons -->
   <script src="https://unpkg.com/@phosphor-icons/web"></script>
-  
   <!-- React & ReactDOM -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  
-  <!-- Babel (브라우저 컴파일러) -->
+  <!-- Babel -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
@@ -39,7 +32,10 @@
     .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #DFD8CE; border-radius: 8px; }
     .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #B39977; }
-    body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; margin: 0; padding: 0; background-color: #F5F2EC; }
+    body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; margin: 0; padding: 0; background-color: #F5F2EC; user-select: none; }
+    input, textarea { user-select: text; }
+    .context-menu-enter { animation: zoomIn 0.15s ease-out forwards; }
+    @keyframes zoomIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
   </style>
 </head>
 <body>
@@ -48,15 +44,9 @@
   <script type="text/babel">
     const { useState, useMemo, useEffect, Fragment } = React;
 
-    // 절대 중복되지 않는 고유 ID 생성기
     const createId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-
-    // =====================================================================
-    // ⚠️ 대표님의 구글 앱스 스크립트 URL ⚠️
-    // =====================================================================
     const GAS_URL = "https://script.google.com/macros/s/AKfycbyzmdTEBrfbcJsuvr29xOhaemgR3dUsHr8DybTq48dJADT7nHXRTcADK8kafHrdz3tK/exec";
     
-    // --- 전역 설정 및 초기 데이터 ---
     const COLUMN_THEMES = {
       wood: { label: '클래식 우드', text: 'text-[#8B5A2B]', bg: 'bg-[#8B5A2B]', light: 'bg-[#EFEBE4]', hover: 'hover:bg-[#DFD8CE]', border: 'border-[#8B5A2B]', ring: 'ring-[#8B5A2B]', panelBg: 'bg-[#F4EBE1]' },
       ocean: { label: '오션 블루', text: 'text-[#0277BD]', bg: 'bg-[#0277BD]', light: 'bg-[#E1F5FE]', hover: 'hover:bg-[#B3E5FC]', border: 'border-[#0277BD]', ring: 'ring-[#0277BD]', panelBg: 'bg-[#E6F3FA]' },
@@ -86,12 +76,7 @@
     };
     const SUBITEM_COLOR_ORDER = Object.keys(SUBITEM_AMOUNT_COLORS);
 
-    const DEFAULT_CARD_HOLDERS = {
-      main: '대표',
-      jecheon1: '이사님',
-      miryang: '대표',
-      jecheon2: '이사님',
-    };
+    const DEFAULT_CARD_HOLDERS = { main: '대표', jecheon1: '이사님', miryang: '대표', jecheon2: '이사님' };
 
     function HwarimLogo() {
       return (
@@ -155,28 +140,25 @@
       const [accountsData, setAccountsData] = useState(INITIAL_ACCOUNTS);
       const [blocks, setBlocks] = useState(INITIAL_BLOCKS);
       
-      const [draggedBlockId, setDraggedBlockId] = useState(null);
-      const [draggedAccountId, setDraggedAccountId] = useState(null);
+      const [draggedItem, setDraggedItem] = useState(null); 
+      const [dragOverZone, setDragOverZone] = useState(null); 
+      
       const [selectedBlocks, setSelectedBlocks] = useState([]);
+      const [collapsedSubItems, setCollapsedSubItems] = useState([]);
       
       const [modal, setModal] = useState({ isOpen: false, mode: 'create', blockData: null, amountInput: '' });
       const [splitModal, setSplitModal] = useState({ isOpen: false, targetType: null, blockId: null, subItemId: null, childId: null, sourceAmount: 0, amountInput: '', label: '' });
       const [reportModal, setReportModal] = useState({ isOpen: false, accountId: null });
       const [closeMonthModal, setCloseMonthModal] = useState({ isOpen: false, accountId: null, monthLabel: '' });
       const [settingsModal, setSettingsModal] = useState({ isOpen: false, accountData: null });
+      const [contextMenu, setContextMenu] = useState({ isOpen: false, x: 0, y: 0, target: null });
+      const [dialog, setDialog] = useState({ isOpen: false, type: '', message: '', defaultValue: '', onConfirm: null });
+      
       const [isSyncing, setIsSyncing] = useState(false);
       const [isInitialLoading, setIsInitialLoading] = useState(true);
       const [lastSavedAt, setLastSavedAt] = useState(null);
-      
-      const [collapsedSubItems, setCollapsedSubItems] = useState([]);
-      
-      // 드래그 상태 관리
-      const [dragOverId, setDragOverId] = useState(null);
-      const [draggedBoardSubItem, setDraggedBoardSubItem] = useState(null);
-      const [draggedBoardChild, setDraggedBoardChild] = useState(null);
-      const [draggedModalSubItemId, setDraggedModalSubItemId] = useState(null);
-      const [draggedModalChild, setDraggedModalChild] = useState(null);
 
+      /* --- 💡 기본 헬퍼 함수 --- */
       const formatCurrency = (amount) => new Intl.NumberFormat('ko-KR').format(amount || 0);
       const twoDigits = (value) => String(value).padStart(2, '0');
       const formatLastSavedAt = (value) => {
@@ -186,1053 +168,494 @@
         return `${date.getFullYear()}년 ${twoDigits(date.getMonth() + 1)}월 ${twoDigits(date.getDate())}일 ${twoDigits(date.getHours())}시 ${twoDigits(date.getMinutes())}분 데이터`;
       };
       
+      /* --- 💡 완벽 무결점 계산 엔진 --- */
       const getAmountValue = (item) => Number(item && item.amount) || 0;
       const getChildItems = (item) => (item && item.childItems) ? item.childItems : [];
-      const getSubItemAmount = (item) => {
-        const childItems = getChildItems(item);
-        if (childItems.length > 0) {
-          return childItems.reduce((sum, child) => sum + getAmountValue(child), 0);
-        }
+      
+      // 어떤 항목이든(대분류/중분류/소분류) UI에 표시될 때 가져야 할 '실질적 통합 금액'을 구하는 절대 함수
+      const getUniversalAmount = (item) => {
+        if (!item) return 0;
+        if (item.subItems && item.subItems.length > 0) return getBlockAmount(item);
         return getAmountValue(item);
       };
-      const getBlockAmount = (item) => {
-        if (item && item.subItems && item.subItems.length > 0) {
-          return item.subItems.reduce((sum, sub) => sum + getSubItemAmount(sub), 0);
+
+      // 중분류: 소분류는 계산에서 완전 무시! 오직 자체 금액만 반환.
+      const getSubItemAmount = (item) => getAmountValue(item);
+      
+      // 대분류 총액 = 하위 중분류들의 합 (없으면 자체 금액)
+      const getBlockAmount = (block) => {
+        if (!block) return 0;
+        if (block.subItems && block.subItems.length > 0) {
+          return block.subItems.reduce((sum, sub) => sum + getSubItemAmount(sub), 0);
         }
-        return getAmountValue(item);
+        return getAmountValue(block);
       };
-      const getEffectiveAmount = (item) => {
-        if (!item || item.isPlanned) return 0;
-        if (item.subItems && item.subItems.length > 0) {
-          return item.subItems.reduce((sum, sub) => sum + (sub.isPlanned ? 0 : getSubItemAmount(sub)), 0);
+      
+      const getEffectiveAmount = (block) => {
+        if (!block || block.isPlanned) return 0;
+        if (block.subItems && block.subItems.length > 0) {
+          return block.subItems.reduce((sum, sub) => sum + (sub.isPlanned ? 0 : getSubItemAmount(sub)), 0);
         }
-        return getAmountValue(item);
+        return getAmountValue(block);
       };
+
       const getAmountTextClass = (amount, colorKey = 'auto', isPlanned = false) => {
         if (isPlanned) return 'text-[#8B5A2B]';
         if (colorKey && colorKey !== 'auto' && SUBITEM_AMOUNT_COLORS[colorKey]) return SUBITEM_AMOUNT_COLORS[colorKey].text;
         return amount >= 0 ? 'text-[#2E7D32]' : 'text-[#C62828]';
       };
+
       const getCardHolders = (account) => {
         const text = (account && (account.cardHolder || DEFAULT_CARD_HOLDERS[account.id])) || '';
         return text.split(/[,，\/|]+/).map(name => name.trim()).filter(Boolean);
       };
 
-      const normalizeSubItem = (item) => {
-        const childItems = item.childItems ? item.childItems.map(child => ({ ...child, id: child.id || createId('c'), amountColor: child.amountColor || 'auto' })) : [];
-        const childTotal = childItems.reduce((sum, child) => sum + getAmountValue(child), 0);
-        return {
-          ...item,
-          id: item.id || createId('s'),
-          amount: childItems.length > 0 ? childTotal : getAmountValue(item),
-          amountString: childItems.length > 0 ? String(childTotal) : item.amountString,
-          amountColor: item.amountColor || 'auto',
-          childItems
-        };
-      };
-      const normalizeBlock = (block) => {
-        const subItems = block.subItems ? block.subItems.map(item => normalizeSubItem(item)) : [];
-        const amount = subItems.length > 0 ? subItems.reduce((sum, item) => sum + getSubItemAmount(item), 0) : getAmountValue(block);
-        return { ...block, id: block.id || createId('b'), amount, subItems };
-      };
-      const updateModalSubItems = (prev, newSubItems) => {
-        const newTotalAmount = newSubItems.reduce((sum, item) => sum + getSubItemAmount(item), 0);
-        return { ...prev, amountInput: formatCurrency(newTotalAmount), blockData: { ...prev.blockData, subItems: newSubItems, amount: newTotalAmount } };
+      /* --- 💡 자동 정리(Auto Cleanup) 엔진 (빈 껍데기 박멸) --- */
+      const cleanupBlocks = (blocksArray) => {
+        return blocksArray.map(b => {
+          let newSubs = (b.subItems || []).map(s => {
+            let newChildren = (s.childItems || []);
+            // 중분류 알맹이가 1개고 자체금액이 0이면 자동 언랩 (소분류 -> 중분류 승격)
+            if (newChildren.length === 1 && getAmountValue(s) === 0) {
+              const singleChild = newChildren[0];
+              return { ...s, label: s.label || singleChild.label, amount: getAmountValue(singleChild), amountColor: singleChild.amountColor, childItems: [] };
+            }
+            return { ...s, childItems: newChildren };
+          }).filter(s => !(s.childItems.length === 0 && getAmountValue(s) === 0));
+          
+          // 대분류 알맹이가 1개고 자체금액이 0이면 자동 언랩 (중분류 -> 대분류 승격)
+          if (newSubs.length === 1 && getAmountValue(b) === 0) {
+            const singleSub = newSubs[0];
+            if (!singleSub.childItems || singleSub.childItems.length === 0) {
+              return { ...b, label: b.label || singleSub.label, amount: getAmountValue(singleSub), isPlanned: !!singleSub.isPlanned, color: b.color || 'none', subItems: [] };
+            }
+          }
+          return { ...b, subItems: newSubs };
+        }).filter(b => !(b.subItems.length === 0 && getAmountValue(b) === 0));
       };
 
-      const selectedSum = useMemo(() => {
-        return blocks.filter(b => selectedBlocks.includes(b.id)).reduce((sum, b) => sum + getEffectiveAmount(b), 0);
-      }, [blocks, selectedBlocks]);
+      // 다이얼로그 헬퍼
+      const openDialog = (type, message, defaultValue = '', onConfirm) => setDialog({ isOpen: true, type, message, defaultValue, onConfirm });
+      const closeDialog = () => setDialog({ isOpen: false, type: '', message: '', defaultValue: '', onConfirm: null });
+      const handleDialogConfirm = (val) => { if (dialog.onConfirm) dialog.onConfirm(val); closeDialog(); };
+
+      // 변환 헬퍼 (드래그 시 금액 손실 방지 적용 - 안전한 색상 매핑)
+      const toBlock = (item, accountId) => {
+        const uAmt = getUniversalAmount(item);
+        const hasSubs = (item.subItems && item.subItems.length > 0) || (item.childItems && item.childItems.length > 0);
+        const validColor = COLOR_TAGS[item.color] ? item.color : (COLOR_TAGS[item.amountColor] ? item.amountColor : 'none');
+        return { id: createId('b'), accountId, label: item.label || '새 항목', amount: hasSubs ? 0 : uAmt, color: validColor, isPlanned: !!item.isPlanned, subItems: item.subItems || item.childItems || [] };
+      };
+      const toSub = (item) => {
+        const validColor = SUBITEM_AMOUNT_COLORS[item.amountColor] ? item.amountColor : (SUBITEM_AMOUNT_COLORS[item.color] ? item.color : 'auto');
+        return { id: createId('s'), label: item.label || '새 항목', amount: getUniversalAmount(item), amountColor: validColor, isPlanned: !!item.isPlanned, childItems: item.childItems || item.subItems || [] };
+      };
+      const toChild = (item) => {
+        const validColor = SUBITEM_AMOUNT_COLORS[item.amountColor] ? item.amountColor : (SUBITEM_AMOUNT_COLORS[item.color] ? item.color : 'auto');
+        return { id: createId('c'), label: item.label || '새 항목', amount: getUniversalAmount(item), amountColor: validColor };
+      };
+
+      const selectedSum = useMemo(() => blocks.filter(b => selectedBlocks.includes(b.id)).reduce((sum, b) => sum + getEffectiveAmount(b), 0), [blocks, selectedBlocks]);
 
       useEffect(() => {
-        if (!GAS_URL || GAS_URL.includes("여기에")) {
-          setIsInitialLoading(false);
-          return;
-        }
+        if (!GAS_URL || GAS_URL.includes("여기에")) { setIsInitialLoading(false); return; }
         fetch(GAS_URL)
-          .then(async res => {
-            const text = await res.text();
-            try { return JSON.parse(text); } catch (e) { throw new Error("GAS_PERMISSION_ERROR"); }
-          })
+          .then(async res => { const text = await res.text(); try { return JSON.parse(text); } catch (e) { throw new Error("GAS_PERMISSION_ERROR"); } })
           .then(data => {
             if (data && Object.keys(data).length > 0) {
               if (Array.isArray(data.accountsData)) setAccountsData(data.accountsData);
-              if (Array.isArray(data.blocks)) setBlocks(data.blocks.map(block => normalizeBlock(block)));
+              if (Array.isArray(data.blocks)) setBlocks(cleanupBlocks(data.blocks));
               if (data.lastSavedAt) setLastSavedAt(data.lastSavedAt);
             }
             setIsInitialLoading(false);
           })
-          .catch(err => {
-            console.error(err);
-            setIsInitialLoading(false);
-          });
+          .catch(err => { console.error(err); setIsInitialLoading(false); });
       }, []);
 
       const syncToCloud = async () => {
-        if (!GAS_URL || GAS_URL.includes("여기에")) return alert("구글 스크립트 웹앱 URL이 입력되지 않았습니다!");
+        if (!GAS_URL || GAS_URL.includes("여기에")) return openDialog('alert', "구글 스크립트 웹앱 URL이 입력되지 않았습니다!");
         setIsSyncing(true);
         try {
           const savedAt = new Date().toISOString();
-          const payload = { accountsData, blocks: blocks.map(block => normalizeBlock(block)), lastSavedAt: savedAt };
+          const payload = { accountsData, blocks: blocks.map(block => ({ ...block, id: block.id || createId('b') })), lastSavedAt: savedAt };
           await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
           setLastSavedAt(savedAt);
-          alert("✅ 안전하게 백업 및 동기화되었습니다!");
-        } catch (err) {
-          alert("❌ 동기화 오류가 발생했습니다.");
-        } finally {
-          setIsSyncing(false);
-        }
+          openDialog('alert', "✅ 안전하게 백업 및 동기화되었습니다!");
+        } catch (err) { openDialog('alert', "❌ 동기화 오류가 발생했습니다."); } finally { setIsSyncing(false); }
       };
 
-      /* --- 💡 드래그 중 휠 스크롤 및 화면 끝 자동 스크롤(Edge Scroll) 지원 --- */
+      /* --- 드래그 중 자동 스크롤 --- */
       useEffect(() => {
-        let scrollInterval = null;
-        let lastX = 0, lastY = 0;
-
-        const isDragging = draggedBlockId || draggedBoardSubItem || draggedBoardChild || draggedAccountId || draggedModalSubItemId || draggedModalChild;
-
-        // 1. 마우스 휠 스크롤 수동 지원 (HTML5 DnD 중 휠이 막히는 브라우저 대응)
+        let scrollInterval = null; let lastX = 0, lastY = 0;
+        const isDragging = !!draggedItem;
         const handleWheel = (e) => {
           if (!isDragging) return;
-          
-          if (modal.isOpen) {
-            const modalScroll = document.querySelector('.custom-scrollbar');
-            if (modalScroll) modalScroll.scrollTop += e.deltaY;
-          } else {
-            const hContainer = document.querySelector('.overflow-x-auto');
-            if (hContainer && (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY))) {
-              hContainer.scrollLeft += (e.deltaX || e.deltaY);
-            } else {
-              window.scrollBy({ top: e.deltaY, left: 0 });
-            }
-          }
+          if (modal.isOpen) { const ms = document.querySelector('.custom-scrollbar'); if (ms) ms.scrollTop += e.deltaY; } 
+          else { const hc = document.querySelector('.overflow-x-auto'); if (hc && (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY))) hc.scrollLeft += (e.deltaX || e.deltaY); else window.scrollBy({ top: e.deltaY, left: 0 }); }
         };
-
-        // 2. 화면 가장자리 자동 스크롤 (Edge Scroll)
-        const handleDragOver = (e) => {
-          if (!isDragging) return;
-          lastX = e.clientX;
-          lastY = e.clientY;
-
+        const handleDragOverEdge = (e) => {
+          if (!isDragging) return; lastX = e.clientX; lastY = e.clientY;
           if (!scrollInterval) {
             scrollInterval = setInterval(() => {
-              const edgeSize = 80; // 화면 끝에서 80px 이내면 스크롤
-              const speed = 20;    // 스크롤 속도
               let sx = 0, sy = 0;
-
-              if (lastY < edgeSize) sy = -speed;
-              else if (window.innerHeight - lastY < edgeSize) sy = speed;
-
-              if (lastX < edgeSize) sx = -speed;
-              else if (window.innerWidth - lastX < edgeSize) sx = speed;
-
+              if (lastY < 80) sy = -20; else if (window.innerHeight - lastY < 80) sy = 20;
+              if (lastX < 80) sx = -20; else if (window.innerWidth - lastX < 80) sx = 20;
               if (sx === 0 && sy === 0) return;
-
-              if (modal.isOpen) {
-                const mScroll = document.querySelector('.custom-scrollbar');
-                if (mScroll) mScroll.scrollTop += sy;
-              } else {
-                window.scrollBy(0, sy);
-                const hContainer = document.querySelector('.overflow-x-auto');
-                if (hContainer && sx !== 0) hContainer.scrollLeft += sx;
-              }
+              if (modal.isOpen) { const ms = document.querySelector('.custom-scrollbar'); if (ms) ms.scrollTop += sy; } 
+              else { window.scrollBy(0, sy); const hc = document.querySelector('.overflow-x-auto'); if (hc && sx !== 0) hc.scrollLeft += sx; }
             }, 16);
           }
         };
+        const stopScroll = () => { if (scrollInterval) { clearInterval(scrollInterval); scrollInterval = null; } };
+        if (isDragging) { window.addEventListener('wheel', handleWheel, { passive: false }); window.addEventListener('dragover', handleDragOverEdge); window.addEventListener('dragend', stopScroll); window.addEventListener('drop', stopScroll); }
+        return () => { window.removeEventListener('wheel', handleWheel); window.removeEventListener('dragover', handleDragOverEdge); window.removeEventListener('dragend', stopScroll); window.removeEventListener('drop', stopScroll); stopScroll(); };
+      }, [draggedItem, modal.isOpen]);
 
-        const stopScroll = () => {
-          if (scrollInterval) {
-            clearInterval(scrollInterval);
-            scrollInterval = null;
-          }
-        };
-
-        if (isDragging) {
-          window.addEventListener('wheel', handleWheel, { passive: false });
-          window.addEventListener('dragover', handleDragOver);
-          window.addEventListener('dragend', stopScroll);
-          window.addEventListener('drop', stopScroll);
-        }
-
-        return () => {
-          window.removeEventListener('wheel', handleWheel);
-          window.removeEventListener('dragover', handleDragOver);
-          window.removeEventListener('dragend', stopScroll);
-          window.removeEventListener('drop', stopScroll);
-          stopScroll();
-        };
-      }, [draggedBlockId, draggedBoardSubItem, draggedBoardChild, draggedAccountId, draggedModalSubItemId, draggedModalChild, modal.isOpen]);
-
-
-      /* --- 드래그 핸들러 (이벤트 버블링 차단) --- */
-      const clearAllDragStates = () => {
-        setDraggedBlockId(null);
-        setDraggedAccountId(null);
-        setDraggedBoardSubItem(null);
-        setDraggedBoardChild(null);
-        setDragOverId(null);
-        setDraggedModalSubItemId(null);
-        setDraggedModalChild(null);
+      /* --- 우클릭 (Context Menu) 및 이름 변경 로직 --- */
+      const handleContextMenu = (e, type, block, subItem, childItem) => {
+        e.preventDefault(); e.stopPropagation();
+        setContextMenu({ isOpen: true, x: e.clientX, y: e.clientY, target: { type, block, subItem, childItem } });
       };
-
-      const handleGenericDragOver = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      };
-
-      const handleDragOverItem = (e, targetId) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (dragOverId !== targetId) {
-          setDragOverId(targetId);
-        }
-      };
-
-      const handleDragLeaveItem = (e, targetId) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (dragOverId === targetId) {
-          setDragOverId(null);
-        }
-      };
-
-      const handleDragStart = (e, blockId) => {
-        if (['BUTTON', 'INPUT', 'TEXTAREA'].includes(e.target.tagName) || e.target.closest('button')) {
-          e.preventDefault(); return;
-        }
-        e.stopPropagation();
-        if(e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', blockId); }
-        setTimeout(() => {
-          clearAllDragStates();
-          setDraggedBlockId(blockId);
-        }, 0);
-      };
-
-      const handleBoardSubItemDragStart = (e, blockId, subItemId) => {
-        if (['BUTTON', 'INPUT', 'TEXTAREA'].includes(e.target.tagName) || e.target.closest('button')) {
-          e.preventDefault(); return;
-        }
-        e.stopPropagation();
-        if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', subItemId); }
-        setTimeout(() => {
-          clearAllDragStates();
-          setDraggedBoardSubItem({ blockId, subItemId });
-        }, 0);
-      };
-
-      const handleBoardChildDragStart = (e, blockId, subItemId, childId) => {
-        if (['BUTTON', 'INPUT', 'TEXTAREA'].includes(e.target.tagName) || e.target.closest('button')) {
-          e.preventDefault(); return;
-        }
-        e.stopPropagation();
-        if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', childId); }
-        setTimeout(() => {
-          clearAllDragStates();
-          setDraggedBoardChild({ blockId, subItemId, childId });
-        }, 0);
-      };
-
-      /* --- 드롭 처리 헬퍼 함수들 --- */
-      const rebuildBlockWithSubItems = (block, subItems) => {
-        const normalizedSubItems = subItems.map(item => normalizeSubItem(item));
-        const amount = normalizedSubItems.length > 0 ? normalizedSubItems.reduce((sum, item) => sum + getSubItemAmount(item), 0) : 0;
-        return { ...block, subItems: normalizedSubItems, amount };
-      };
-
-      // 💡 [순서 변경] - 박스 사이에 넣을 때
-      const moveBoardSubItemTo = (targetBlockId, targetSubItemId) => {
-        if (!draggedBoardSubItem) return;
-        if (draggedBoardSubItem.blockId === targetBlockId && draggedBoardSubItem.subItemId === targetSubItemId) return;
-
-        setBlocks(prev => {
-          let movedSubItem = null;
-          let sourceIndex = -1;
-          let targetOriginalIndex = -1;
-
-          const sBlock = prev.find(b => b.id === draggedBoardSubItem.blockId);
-          if (sBlock) sourceIndex = (sBlock.subItems || []).findIndex(s => s.id === draggedBoardSubItem.subItemId);
-          const tBlock = prev.find(b => b.id === targetBlockId);
-          if (tBlock && targetSubItemId) targetOriginalIndex = (tBlock.subItems || []).findIndex(s => s.id === targetSubItemId);
-
-          let nextBlocks = prev.map(block => {
-            if (block.id !== draggedBoardSubItem.blockId) return block;
-            const subItems = (block.subItems || []).filter(item => {
-              if (item.id === draggedBoardSubItem.subItemId) { movedSubItem = normalizeSubItem(item); return false; }
-              return true;
-            });
-            return rebuildBlockWithSubItems(block, subItems);
-          });
-
-          if (!movedSubItem) return prev;
-
-          return nextBlocks.map(block => {
-            if (block.id !== targetBlockId) return block;
-            const subItems = (block.subItems || []).map(item => normalizeSubItem(item));
-            let insertIndex = subItems.length;
-            if (targetSubItemId) {
-              insertIndex = subItems.findIndex(item => item.id === targetSubItemId);
-              if (draggedBoardSubItem.blockId === targetBlockId && sourceIndex > -1 && targetOriginalIndex > -1 && sourceIndex < targetOriginalIndex) {
-                insertIndex += 1; 
-              }
-            }
-            if (insertIndex < 0) insertIndex = subItems.length;
-            subItems.splice(insertIndex, 0, movedSubItem);
-            return rebuildBlockWithSubItems(block, subItems);
-          });
-        });
-      };
-
-      const promoteBoardChildToSubItem = (targetBlockId, targetSubItemId) => {
-        if (!draggedBoardChild) return;
-        setBlocks(prev => {
-          let movedChild = null;
-          let nextBlocks = prev.map(block => {
-            if (block.id !== draggedBoardChild.blockId) return block;
-            const subItems = (block.subItems || []).map(item => {
-              const normalizedItem = normalizeSubItem(item);
-              if (normalizedItem.id !== draggedBoardChild.subItemId) return normalizedItem;
-              const childItems = getChildItems(normalizedItem).filter(child => {
-                if (child.id === draggedBoardChild.childId) { movedChild = { ...child }; return false; }
-                return true;
-              });
-              return recalcSubItem(normalizedItem, childItems);
-            });
-            return rebuildBlockWithSubItems(block, subItems);
-          });
-          if (!movedChild) return prev;
-
-          const movedSubItem = childToSubItem(movedChild);
-          return nextBlocks.map(block => {
-            if (block.id !== targetBlockId) return block;
-            const subItems = (block.subItems || []).map(item => normalizeSubItem(item));
-            let insertIndex = targetSubItemId ? subItems.findIndex(item => item.id === targetSubItemId) : subItems.length;
-            if (insertIndex < 0) insertIndex = subItems.length;
-            subItems.splice(insertIndex, 0, movedSubItem);
-            return rebuildBlockWithSubItems(block, subItems);
-          });
-        });
-      };
-
-      const moveBoardChildTo = (targetBlockId, targetSubItemId, targetChildId) => {
-        if (!draggedBoardChild) return;
-        setBlocks(prev => {
-          let movedChild = null;
-          let sourceIndex = -1;
-          let targetOriginalIndex = -1;
-
-          const sBlock = prev.find(b => b.id === draggedBoardChild.blockId);
-          if (sBlock) {
-             const sSub = (sBlock.subItems || []).find(s => s.id === draggedBoardChild.subItemId);
-             if (sSub) sourceIndex = getChildItems(sSub).findIndex(c => c.id === draggedBoardChild.childId);
-          }
-          const tBlock = prev.find(b => b.id === targetBlockId);
-          if (tBlock && targetSubItemId && targetChildId) {
-             const tSub = (tBlock.subItems || []).find(s => s.id === targetSubItemId);
-             if (tSub) targetOriginalIndex = getChildItems(tSub).findIndex(c => c.id === targetChildId);
-          }
-
-          let nextBlocks = prev.map(block => {
-            if (block.id !== draggedBoardChild.blockId) return block;
-            const subItems = (block.subItems || []).map(item => {
-              const normalizedItem = normalizeSubItem(item);
-              if (normalizedItem.id !== draggedBoardChild.subItemId) return normalizedItem;
-              const childItems = getChildItems(normalizedItem).filter(child => {
-                if (child.id === draggedBoardChild.childId) { movedChild = { ...child }; return false; }
-                return true;
-              });
-              return recalcSubItem(normalizedItem, childItems);
-            });
-            return rebuildBlockWithSubItems(block, subItems);
-          });
-          
-          if (!movedChild) return prev;
-
-          return nextBlocks.map(block => {
-            if (block.id !== targetBlockId) return block;
-            const subItems = (block.subItems || []).map(item => {
-              const normalizedItem = normalizeSubItem(item);
-              if (normalizedItem.id !== targetSubItemId) return normalizedItem;
-              let childItems = getChildItems(normalizedItem).map(child => ({ ...child }));
-              
-              let insertIndex = childItems.length;
-              if (targetChildId) {
-                insertIndex = childItems.findIndex(child => child.id === targetChildId);
-                if (draggedBoardChild.blockId === targetBlockId && draggedBoardChild.subItemId === targetSubItemId && sourceIndex > -1 && targetOriginalIndex > -1 && sourceIndex < targetOriginalIndex) {
-                  insertIndex += 1;
-                }
-              }
-              
-              if (insertIndex < 0) insertIndex = childItems.length;
-              childItems.splice(insertIndex, 0, movedChild);
-              return recalcSubItem(normalizedItem, childItems);
-            });
-            return rebuildBlockWithSubItems(block, subItems);
-          });
-        });
-      };
-
-      // 💡 [병합] - 박스 몸통 정중앙에 넣을 때 하위로 쏙! (기존 금액 생성 안 함)
-      const moveBoardSubItemIntoChild = (targetBlockId, targetSubItemId) => {
-        if (!draggedBoardSubItem) return;
-        if (draggedBoardSubItem.blockId === targetBlockId && draggedBoardSubItem.subItemId === targetSubItemId) return; // 자신한테 들어가는 오류 방지
-
-        setBlocks(prev => {
-          let movedSubItem = null;
-          let nextBlocks = prev.map(block => {
-            if (block.id !== draggedBoardSubItem.blockId) return block;
-            const subItems = (block.subItems || []).filter(item => {
-              if (item.id === draggedBoardSubItem.subItemId) { movedSubItem = normalizeSubItem(item); return false; }
-              return true;
-            });
-            return rebuildBlockWithSubItems(block, subItems);
-          });
-          if (!movedSubItem) return prev;
-
-          const movedChild = subItemToChildItem(movedSubItem);
-          return nextBlocks.map(block => {
-            if (block.id !== targetBlockId) return block;
-            const subItems = (block.subItems || []).map(item => {
-              const normalizedItem = normalizeSubItem(item);
-              if (normalizedItem.id !== targetSubItemId) return normalizedItem;
-              let childItems = getChildItems(normalizedItem).map(child => ({ ...child }));
-              // "기존 금액" 생성 없이 바로 병합
-              childItems.push(movedChild); 
-              return recalcSubItem(normalizedItem, childItems);
-            });
-            return rebuildBlockWithSubItems(block, subItems);
-          });
-        });
-      };
-
-
-      /* --- 통합 Drop 핸들러 (병합/순서변경 완벽 분리) --- */
+      const closeContextMenu = () => setContextMenu({ isOpen: false, x: 0, y: 0, target: null });
       
-      const handleDropOnBlockReorder = (e, targetAccountId, targetBlockId) => {
-        e.preventDefault(); e.stopPropagation();
-        setDragOverId(null);
-        if (draggedBlockId) {
-          if (draggedBlockId === targetBlockId) { clearAllDragStates(); return; }
-          setBlocks(prev => {
-            const bIndex = prev.findIndex(b => b.id === draggedBlockId);
-            if (bIndex < 0) return prev;
-            const newBlocks = [...prev];
-            const [movedBlock] = newBlocks.splice(bIndex, 1);
-            movedBlock.accountId = targetAccountId;
-
-            const tIndex = newBlocks.findIndex(b => b.id === targetBlockId);
-            newBlocks.splice(tIndex < 0 ? newBlocks.length : tIndex, 0, movedBlock);
-            return newBlocks;
-          });
-        } else if (draggedBoardSubItem) {
-          setBlocks(prev => {
-            let movedSubItem = null;
-            const newBlocks = prev.map(b => {
-              if (b.id === draggedBoardSubItem.blockId) {
-                const subItems = (b.subItems || []).filter(s => {
-                  if (s.id === draggedBoardSubItem.subItemId) { movedSubItem = s; return false; }
-                  return true;
-                });
-                return rebuildBlockWithSubItems(b, subItems);
+      const handleRenameLabel = (type, blockId, subItemId, childId, currentLabel) => {
+        openDialog('prompt', '항목의 새로운 이름을 입력하세요:', currentLabel, (newLabel) => {
+          if (!newLabel || newLabel.trim() === '') return;
+          setBlocks(prev => prev.map(b => {
+            if (b.id !== blockId) return b;
+            if (type === 'block') return { ...b, label: newLabel.trim() };
+            const newSubs = (b.subItems || []).map(s => {
+              if (s.id !== subItemId) return s;
+              if (type === 'sub') return { ...s, label: newLabel.trim() };
+              if (type === 'child') {
+                return { ...s, childItems: (s.childItems || []).map(c => c.id === childId ? { ...c, label: newLabel.trim() } : c) };
               }
-              return b;
+              return s;
             });
-            if (movedSubItem) {
-              const newBlock = {
-                id: createId('b_ext'), accountId: targetAccountId, label: movedSubItem.label, amount: getSubItemAmount(movedSubItem),
-                color: 'none', isPlanned: !!movedSubItem.isPlanned, subItems: getChildItems(movedSubItem).map(c => ({ ...c, childItems: [] }))
-              };
-              const tIndex = newBlocks.findIndex(b => b.id === targetBlockId);
-              newBlocks.splice(tIndex < 0 ? newBlocks.length : tIndex, 0, newBlock);
+            return { ...b, subItems: newSubs };
+          }));
+        });
+      };
+
+      const handleContextMenuRename = () => {
+        const { type, block, subItem, childItem } = contextMenu.target;
+        const currentLabel = type === 'block' ? block.label : type === 'sub' ? subItem.label : childItem.label;
+        handleRenameLabel(type, block.id, subItem?.id, childItem?.id, currentLabel);
+        closeContextMenu();
+      };
+
+      const handleContextMenuSplit = () => {
+        const { type, block, subItem, childItem } = contextMenu.target;
+        openSplitModal(null, type, block, subItem, childItem);
+        closeContextMenu();
+      };
+
+      /* --- 💡 마스터 통합 DND 엔진 --- */
+      const clearAllDragStates = () => { setDraggedItem(null); setDragOverZone(null); };
+      const handleGenericDragOver = (e) => { e.preventDefault(); e.stopPropagation(); };
+      const handleDragOver = (e, zoneId) => { e.preventDefault(); e.stopPropagation(); if (dragOverZone !== zoneId) setDragOverZone(zoneId); };
+      const handleDragLeave = (e) => { e.preventDefault(); e.stopPropagation(); setDragOverZone(null); };
+
+      const handleDragStart = (e, type, id) => {
+        if (['BUTTON', 'INPUT', 'TEXTAREA'].includes(e.target.tagName) || e.target.closest('button')) { e.preventDefault(); return; }
+        e.stopPropagation(); closeContextMenu();
+        if(e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id); }
+        setTimeout(() => { clearAllDragStates(); setDraggedItem({ type, id }); }, 0);
+      };
+
+      // 빼낼 때 정확히 금액 차감!
+      const extractItem = (currentBlocks, type, id) => {
+        let extracted = null;
+        const newBlocks = currentBlocks.map(b => {
+          if (type === 'block' && b.id === id) { extracted = b; return null; }
+          const newSubs = (b.subItems || []).map(s => {
+            if (type === 'sub' && s.id === id) { extracted = s; return null; }
+            let extractedFromChild = false;
+            const newChildren = (s.childItems || []).filter(c => {
+              if (type === 'child' && c.id === id) { extracted = c; extractedFromChild = true; return false; }
+              return true;
+            });
+            // 소분류가 빠져나가면 부모 금액에서 정확히 그만큼 차감!
+            if (extractedFromChild) {
+              return { ...s, amount: getAmountValue(s) - getAmountValue(extracted), childItems: newChildren };
             }
-            return newBlocks;
-          });
-        } else if (draggedBoardChild) {
-          setBlocks(prev => {
-            let movedChild = null;
-            const newBlocks = prev.map(b => {
-              if (b.id === draggedBoardChild.blockId) {
-                const subItems = (b.subItems || []).map(s => {
-                  if (s.id === draggedBoardChild.subItemId) {
-                    const childItems = getChildItems(s).filter(c => {
-                      if (c.id === draggedBoardChild.childId) { movedChild = c; return false; }
-                      return true;
-                    });
-                    return recalcSubItem(s, childItems);
-                  }
-                  return s;
-                });
-                return rebuildBlockWithSubItems(b, subItems);
-              }
-              return b;
-            });
-            if (movedChild) {
-              const newBlock = {
-                id: createId('b_ext'), accountId: targetAccountId, label: movedChild.label, amount: movedChild.amount,
-                color: 'none', isPlanned: !!movedChild.isPlanned, subItems: []
-              };
-              const tIndex = newBlocks.findIndex(b => b.id === targetBlockId);
-              newBlocks.splice(tIndex < 0 ? newBlocks.length : tIndex, 0, newBlock);
+            return { ...s, childItems: newChildren };
+          }).filter(Boolean);
+          return { ...b, subItems: newSubs };
+        }).filter(Boolean);
+        return { extracted, newBlocks };
+      };
+
+      const handleDrop = (e, targetType, targetId, position, accountId) => {
+        e.preventDefault(); e.stopPropagation(); setDragOverZone(null);
+        if (!draggedItem || draggedItem.id === targetId) { setDraggedItem(null); return; }
+
+        if (draggedItem.type === 'column') {
+          if (targetType === 'column') {
+            const draggedIdx = accountsData.findIndex(a => a.id === draggedItem.id);
+            const targetIdx = accountsData.findIndex(a => a.id === targetId);
+            if (draggedIdx !== -1 && targetIdx !== -1 && draggedIdx !== targetIdx) {
+              const newAccs = [...accountsData]; const [removed] = newAccs.splice(draggedIdx, 1); newAccs.splice(targetIdx, 0, removed); setAccountsData(newAccs);
             }
-            return newBlocks;
-          });
-        }
-        clearAllDragStates();
-      };
-
-      const handleDropOnBlockMerge = (e, targetAccountId, targetBlockId) => {
-        e.preventDefault(); e.stopPropagation();
-        setDragOverId(null);
-        if (draggedBlockId) {
-          if (draggedBlockId === targetBlockId) { clearAllDragStates(); return; }
-          setBlocks(prev => {
-            const rawSource = prev.find(b => b.id === draggedBlockId);
-            if (!rawSource) return prev;
-            const source = normalizeBlock(rawSource);
-            return prev.filter(b => b.id !== draggedBlockId).map(b => {
-              if (b.id === targetBlockId) {
-                let newSubItems = b.subItems ? b.subItems.map(item => ({ ...normalizeSubItem(item), isPlanned: !!b.isPlanned || !!item.isPlanned })) : [];
-                // 💡 "기존 금액" 생성 없이 바로 병합
-                newSubItems.push({
-                  id: createId('s_mrg'), label: source.label, amount: getBlockAmount(source), isPlanned: !!source.isPlanned, amountColor: 'auto',
-                  childItems: source.subItems ? source.subItems.map(item => ({ id: createId('c_mrg'), label: item.label, amount: getSubItemAmount(item), amountColor: item.amountColor || 'auto' })) : []
-                });
-                const newTotal = newSubItems.reduce((sum, item) => sum + getSubItemAmount(item), 0);
-                return { ...b, isPlanned: false, subItems: newSubItems, amount: newTotal };
-              }
-              return b;
-            });
-          });
-        }
-        clearAllDragStates();
-      };
-
-      const handleDropOnSubItemMerge = (e, targetBlockId, targetSubItemId) => {
-        e.preventDefault(); e.stopPropagation();
-        setDragOverId(null);
-        if (draggedBlockId) handleDropOnBlockMerge(e, null, targetBlockId); 
-        else if (draggedBoardSubItem) moveBoardSubItemIntoChild(targetBlockId, targetSubItemId); 
-        else if (draggedBoardChild) moveBoardChildTo(targetBlockId, targetSubItemId, null); // 자식을 중분류 바에 놓으면 자식의 맨 뒤로
-        clearAllDragStates();
-      };
-
-      const handleDropOnSubItemReorder = (e, targetBlockId, targetSubItemId) => {
-        e.preventDefault(); e.stopPropagation();
-        setDragOverId(null);
-        if (draggedBlockId) handleDropOnBlockReorder(e, null, targetBlockId); 
-        else if (draggedBoardSubItem) moveBoardSubItemTo(targetBlockId, targetSubItemId);
-        else if (draggedBoardChild) promoteBoardChildToSubItem(targetBlockId, targetSubItemId);
-        clearAllDragStates();
-      };
-
-      const handleDropOnChildItemReorder = (e, targetBlockId, targetSubItemId, targetChildId) => {
-        e.preventDefault(); e.stopPropagation();
-        setDragOverId(null);
-        if (draggedBlockId) handleDropOnBlockMerge(e, null, targetBlockId);
-        else if (draggedBoardSubItem) moveBoardSubItemIntoChild(targetBlockId, targetSubItemId);
-        else if (draggedBoardChild) moveBoardChildTo(targetBlockId, targetSubItemId, targetChildId);
-        clearAllDragStates();
-      };
-
-      const handleDropOnChildItem = (e, targetBlockId, targetSubItemId, targetChildId) => {
-        e.preventDefault(); e.stopPropagation();
-        setDragOverId(null);
-        if (draggedBlockId) handleDropOnBlockMerge(e, null, targetBlockId);
-        else if (draggedBoardSubItem) moveBoardSubItemIntoChild(targetBlockId, targetSubItemId);
-        else if (draggedBoardChild) moveBoardChildTo(targetBlockId, targetSubItemId, targetChildId);
-        clearAllDragStates();
-      };
-
-      // 기둥(Column) 드롭 (다른 패널로 이동 / 대분류 분리)
-      const handleDropOnColumn = (e, targetAccountId) => {
-        e.preventDefault(); e.stopPropagation();
-        setDragOverId(null);
-        
-        if (draggedAccountId) {
-          const draggedIdx = accountsData.findIndex(a => a.id === draggedAccountId);
-          const targetIdx = accountsData.findIndex(a => a.id === targetAccountId);
-          if (draggedIdx !== -1 && targetIdx !== -1 && draggedIdx !== targetIdx) {
-            const newAccs = [...accountsData];
-            const [removed] = newAccs.splice(draggedIdx, 1);
-            newAccs.splice(targetIdx, 0, removed);
-            setAccountsData(newAccs);
           }
-        } else if (draggedBoardSubItem) {
-          setBlocks(prev => {
-            let movedSubItem = null;
-            const newBlocks = prev.map(b => {
-              if (b.id === draggedBoardSubItem.blockId) {
-                const subItems = (b.subItems || []).filter(s => {
-                  if (s.id === draggedBoardSubItem.subItemId) { movedSubItem = s; return false; }
-                  return true;
-                });
-                return rebuildBlockWithSubItems(b, subItems);
-              }
-              return b;
-            });
-            if (movedSubItem) {
-              newBlocks.push({
-                id: createId('b_ext'), accountId: targetAccountId, label: movedSubItem.label, amount: getSubItemAmount(movedSubItem),
-                color: 'none', isPlanned: !!movedSubItem.isPlanned, subItems: getChildItems(movedSubItem).map(c => ({ ...c, childItems: [] }))
-              });
-            }
-            return newBlocks;
-          });
-        } else if (draggedBoardChild) {
-          setBlocks(prev => {
-            let movedChild = null;
-            const newBlocks = prev.map(b => {
-              if (b.id === draggedBoardChild.blockId) {
-                const subItems = (b.subItems || []).map(s => {
-                  if (s.id === draggedBoardChild.subItemId) {
-                    const childItems = getChildItems(s).filter(c => {
-                      if (c.id === draggedBoardChild.childId) { movedChild = c; return false; }
-                      return true;
-                    });
-                    return recalcSubItem(s, childItems);
-                  }
-                  return s;
-                });
-                return rebuildBlockWithSubItems(b, subItems);
-              }
-              return b;
-            });
-            if (movedChild) {
-              newBlocks.push({
-                id: createId('b_ext'), accountId: targetAccountId, label: movedChild.label, amount: movedChild.amount,
-                color: 'none', isPlanned: !!movedChild.isPlanned, subItems: []
-              });
-            }
-            return newBlocks;
-          });
-        } else if (draggedBlockId) {
-          setBlocks(prev => {
-            const draggedBlock = prev.find(b => b.id === draggedBlockId);
-            const newBlocks = prev.filter(b => b.id !== draggedBlockId);
-            newBlocks.push({ ...draggedBlock, accountId: targetAccountId });
-            return newBlocks;
-          });
+          setDraggedItem(null); return;
         }
-        clearAllDragStates();
+
+        const { extracted, newBlocks } = extractItem(blocks, draggedItem.type, draggedItem.id);
+        if (!extracted) { setDraggedItem(null); return; }
+
+        const extAmount = getUniversalAmount(extracted); // 시각적으로 가지고 있던 총합 획득
+        let finalBlocks = [...newBlocks];
+
+        if (position === 'inside') {
+          // 병합 시 이름 변경 프롬프트 호출
+          let newLabel = extracted.label;
+          openDialog('prompt', "두 항목이 합쳐집니다. 새로운 이름을 입력하세요:", extracted.label, (val) => {
+            if (val && val.trim() !== '') newLabel = val.trim();
+            
+            let tempBlocks = finalBlocks.map(b => {
+              if (targetType === 'block' && b.id === targetId) {
+                 let newSubs = [...(b.subItems || [])];
+                 if (newSubs.length === 0 && getAmountValue(b) !== 0) {
+                   newSubs.push(toSub({ ...b, label: b.label }));
+                 }
+                 if (extracted.subItems && extracted.subItems.length > 0) newSubs.push(...extracted.subItems.map(i => ({...i, id: createId('s')})));
+                 else newSubs.push(toSub(extracted));
+                 return { ...b, label: newLabel, amount: 0, subItems: newSubs }; // 부모 금액은 0으로 지우고 하위에서 계산
+              }
+              let newSubs = (b.subItems || []).map(s => {
+                if (targetType === 'sub' && s.id === targetId) {
+                   let newChildren = [...(s.childItems || [])];
+                   if (newChildren.length === 0 && getAmountValue(s) !== 0) {
+                     newChildren.push(toChild({ ...s, label: s.label }));
+                   }
+                   if (extracted.childItems && extracted.childItems.length > 0) newChildren.push(...extracted.childItems.map(i => ({...i, id: createId('c')})));
+                   else newChildren.push(toChild(extracted));
+                   
+                   // 중분류끼리 합칠 때는 순수하게 자체 금액만 더합니다.
+                   const mergedAmount = getAmountValue(s) + extAmount;
+                   return { ...s, label: newLabel, amount: mergedAmount, childItems: newChildren };
+                }
+                return s;
+              });
+              return { ...b, subItems: newSubs };
+            });
+            setBlocks(cleanupBlocks(tempBlocks));
+          });
+          setDraggedItem(null);
+          return; // Prompt is async
+        } else {
+          // 재배열 또는 삽입 (Insert)
+          const insert = (arr, itemToInsert, tid, isAppend) => {
+            if (isAppend) return [...arr, itemToInsert];
+            const idx = arr.findIndex(i => i.id === tid);
+            if (idx === -1) return arr;
+            const copy = [...arr]; copy.splice(position === 'before' ? idx : idx + 1, 0, itemToInsert); return copy;
+          };
+
+          if (targetType === 'block') {
+            finalBlocks = insert(finalBlocks, toBlock(extracted, accountId), targetId);
+          } else if (targetType === 'sub') {
+            finalBlocks = finalBlocks.map(b => ({ ...b, subItems: insert(b.subItems || [], toSub(extracted), targetId) }));
+          } else if (targetType === 'child') {
+            // 소분류 틈에 넣을 때, 부모 중분류에 금액을 정확히 더해줍니다!
+            finalBlocks = finalBlocks.map(b => ({
+              ...b,
+              subItems: (b.subItems || []).map(s => {
+                const hasTarget = (s.childItems || []).some(c => c.id === targetId);
+                if (hasTarget) {
+                  return { ...s, amount: getAmountValue(s) + extAmount, childItems: insert(s.childItems || [], toChild(extracted), targetId) };
+                }
+                return s;
+              })
+            }));
+          } else if (targetType === 'column' || targetType === 'bottom') {
+            finalBlocks.push(toBlock(extracted, accountId));
+          } else if (targetType === 'sub-bottom') {
+            finalBlocks = finalBlocks.map(b => b.id === targetId ? { ...b, subItems: [...(b.subItems || []), toSub(extracted)] } : b);
+          } else if (targetType === 'child-bottom') {
+            finalBlocks = finalBlocks.map(b => ({
+              ...b,
+              subItems: (b.subItems || []).map(s => {
+                if (s.id === targetId) return { ...s, amount: getAmountValue(s) + extAmount, childItems: [...(s.childItems || []), toChild(extracted)] };
+                return s;
+              })
+            }));
+          }
+          setBlocks(cleanupBlocks(finalBlocks));
+        }
+        setDraggedItem(null);
       };
 
       /* --- 확장된 금액 나누기 (Split) --- */
       const openSplitModal = (e, type, block, subItem, childItem) => {
-        e.stopPropagation();
+        if(e) e.stopPropagation();
+        if (type === 'block' && block.subItems && block.subItems.length > 0) return openDialog('alert', "하위 항목이 포함된 박스는 분할할 수 없습니다.\n먼저 항목을 밖으로 빼낸 뒤 분할해주세요.");
+        if (type === 'sub' && getChildItems(subItem).length > 0) return openDialog('alert', "하위 항목이 포함된 항목은 분할할 수 없습니다.\n먼저 항목을 밖으로 빼낸 뒤 분할해주세요.");
 
-        if (type === 'block' && block.subItems && block.subItems.length > 0) {
-          return alert("하위 항목이 포함된 박스는 분할할 수 없습니다.\n먼저 항목을 밖으로 빼낸 뒤 분할해주세요.");
-        }
-        if (type === 'sub' && getChildItems(subItem).length > 0) {
-          return alert("하위 항목이 포함된 박스는 분할할 수 없습니다.\n먼저 항목을 밖으로 빼낸 뒤 분할해주세요.");
-        }
-
-        let sourceAmount = 0; let label = '';
-        if (type === 'block') { sourceAmount = block.amount; label = block.label; }
-        else if (type === 'sub') { sourceAmount = getSubItemAmount(subItem); label = subItem.label; }
-        else if (type === 'child') { sourceAmount = childItem.amount; label = childItem.label; }
-
-        setSplitModal({
-          isOpen: true, targetType: type,
-          blockId: block?.id, subItemId: subItem?.id, childId: childItem?.id,
-          sourceAmount, label, amountInput: ''
-        });
+        let sourceAmount = type === 'block' ? block.amount : type === 'sub' ? getAmountValue(subItem) : getAmountValue(childItem);
+        let label = type === 'block' ? block.label : type === 'sub' ? subItem.label : childItem.label;
+        setSplitModal({ isOpen: true, targetType: type, blockId: block?.id, subItemId: subItem?.id, childId: childItem?.id, sourceAmount, label, amountInput: '' });
       };
 
-      const handleSplitAmountChange = (e) => {
-        let val = e.target.value.replace(/[^0-9]/g, '');
-        setSplitModal(p => ({ ...p, amountInput: val ? formatCurrency(parseInt(val, 10)) : '' }));
-      };
+      const handleSplitAmountChange = (e) => { let val = e.target.value.replace(/[^0-9]/g, ''); setSplitModal(p => ({ ...p, amountInput: val ? formatCurrency(parseInt(val, 10)) : '' })); };
 
       const executeSplit = (e) => {
         e.preventDefault();
         const val = parseInt(splitModal.amountInput.replace(/[^0-9]/g, ''), 10);
-        if (!val || val <= 0) return alert('분리해 낼 금액을 정확히 입력하세요.');
-        
-        const sign = splitModal.sourceAmount >= 0 ? 1 : -1;
-        const splitVal = val * sign;
-
-        if (Math.abs(splitVal) >= Math.abs(splitModal.sourceAmount)) {
-          return alert('기존 금액보다 작은 금액만 떼어낼 수 있습니다.');
-        }
+        if (!val || val <= 0) return openDialog('alert', '분리해 낼 금액을 정확히 입력하세요.');
+        const sign = splitModal.sourceAmount >= 0 ? 1 : -1; const splitVal = val * sign;
+        if (Math.abs(splitVal) >= Math.abs(splitModal.sourceAmount)) return openDialog('alert', '기존 금액보다 작은 금액만 떼어낼 수 있습니다.');
 
         setBlocks(prev => {
           let newBlocks = [...prev];
-
           if (splitModal.targetType === 'block') {
-            newBlocks = newBlocks.map(b => {
-              if (b.id === splitModal.blockId) return { ...b, amount: b.amount - splitVal };
-              return b;
-            });
-            const sourceBlock = prev.find(b => b.id === splitModal.blockId);
-            const targetIndex = newBlocks.findIndex(b => b.id === splitModal.blockId);
-            newBlocks.splice(targetIndex + 1, 0, {
-              id: createId('b_split'), accountId: sourceBlock.accountId, label: `${sourceBlock.label} (분할)`,
-              amount: splitVal, color: sourceBlock.color, isPlanned: !!sourceBlock.isPlanned, subItems: []
-            });
+            newBlocks = newBlocks.map(b => b.id === splitModal.blockId ? { ...b, amount: b.amount - splitVal } : b);
+            const sourceBlock = prev.find(b => b.id === splitModal.blockId); const targetIndex = newBlocks.findIndex(b => b.id === splitModal.blockId);
+            newBlocks.splice(targetIndex + 1, 0, { id: createId('b_split'), accountId: sourceBlock.accountId, label: `${sourceBlock.label} (분리)`, amount: splitVal, color: sourceBlock.color, isPlanned: !!sourceBlock.isPlanned, subItems: [] });
           }
           else if (splitModal.targetType === 'sub') {
             newBlocks = newBlocks.map(b => {
               if (b.id !== splitModal.blockId) return b;
-              const newSubItems = [...b.subItems];
-              const sIdx = newSubItems.findIndex(s => s.id === splitModal.subItemId);
+              const newSubs = [...(b.subItems || [])]; const sIdx = newSubs.findIndex(s => s.id === splitModal.subItemId);
               if(sIdx > -1) {
-                const sourceSub = newSubItems[sIdx];
-                newSubItems[sIdx] = { ...sourceSub, amount: sourceSub.amount - splitVal };
-                newSubItems.splice(sIdx + 1, 0, {
-                  id: createId('s_split'), label: `${sourceSub.label} (분할)`, amount: splitVal,
-                  amountColor: sourceSub.amountColor, isPlanned: !!sourceSub.isPlanned, childItems: []
-                });
-              }
-              return rebuildBlockWithSubItems(b, newSubItems);
+                const sourceSub = newSubs[sIdx]; newSubs[sIdx] = { ...sourceSub, amount: sourceSub.amount - splitVal };
+                newSubs.splice(sIdx + 1, 0, { id: createId('s_split'), label: `${sourceSub.label} (분리)`, amount: splitVal, amountColor: sourceSub.amountColor, isPlanned: !!sourceSub.isPlanned, childItems: [] });
+              } return { ...b, subItems: newSubs };
             });
           }
           else if (splitModal.targetType === 'child') {
             newBlocks = newBlocks.map(b => {
               if (b.id !== splitModal.blockId) return b;
-              const newSubItems = b.subItems.map(s => {
+              const newSubs = (b.subItems || []).map(s => {
                 if (s.id !== splitModal.subItemId) return s;
-                const newChildItems = [...getChildItems(s)];
-                const cIdx = newChildItems.findIndex(c => c.id === splitModal.childId);
+                const newChildren = [...(s.childItems || [])]; const cIdx = newChildren.findIndex(c => c.id === splitModal.childId);
                 if (cIdx > -1) {
-                  const sourceChild = newChildItems[cIdx];
-                  newChildItems[cIdx] = { ...sourceChild, amount: sourceChild.amount - splitVal };
-                  newChildItems.splice(cIdx + 1, 0, {
-                    id: createId('c_split'), label: `${sourceChild.label} (분할)`, amount: splitVal, amountColor: sourceChild.amountColor
-                  });
-                }
-                return recalcSubItem(s, newChildItems);
-              });
-              return rebuildBlockWithSubItems(b, newSubItems);
+                  const sourceChild = newChildren[cIdx]; newChildren[cIdx] = { ...sourceChild, amount: sourceChild.amount - splitVal };
+                  newChildren.splice(cIdx + 1, 0, { id: createId('c_split'), label: `${sourceChild.label} (분리)`, amount: splitVal, amountColor: sourceChild.amountColor });
+                } return { ...s, childItems: newChildren };
+              }); return { ...b, subItems: newSubs };
             });
           }
-          return newBlocks;
+          return cleanupBlocks(newBlocks);
         });
-
         setSplitModal({ isOpen: false, targetType: null, blockId: null, subItemId: null, childId: null, sourceAmount: 0, amountInput: '', label: '' });
       };
 
-      /* --- 블록 다중 선택 로직 --- */
       const handleBlockClick = (e, blockId) => {
         if (e.target.closest('.no-select-trigger') || e.target.closest('button')) return;
-        if (e.ctrlKey || e.metaKey) {
-          setSelectedBlocks(prev => prev.includes(blockId) ? prev.filter(id => id !== blockId) : [...prev, blockId]);
-        } else {
-          setSelectedBlocks(prev => (prev.length === 1 && prev[0] === blockId) ? [] : [blockId]);
-        }
+        if (e.ctrlKey || e.metaKey) setSelectedBlocks(prev => prev.includes(blockId) ? prev.filter(id => id !== blockId) : [...prev, blockId]);
+        else setSelectedBlocks(prev => (prev.length === 1 && prev[0] === blockId) ? [] : [blockId]);
       };
-
-      const handleBgClick = (e) => {
-        if (!e.target.closest('.block-item') && !e.target.closest('.selection-bar')) setSelectedBlocks([]);
-      };
+      const handleBgClick = (e) => { closeContextMenu(); if (e && e.target && !e.target.closest('.block-item') && !e.target.closest('.selection-bar')) setSelectedBlocks([]); };
 
       /* --- 그 외 모달 관련 함수들 --- */
-      const openCloseMonthModal = (accountId) => {
-        const today = new Date();
-        const defaultMonth = `${today.getFullYear()}. ${String(today.getMonth() + 1).padStart(2, '0')}월`;
-        setCloseMonthModal({ isOpen: true, accountId, monthLabel: defaultMonth });
-      };
+      const openCloseMonthModal = (accountId) => { const today = new Date(); setCloseMonthModal({ isOpen: true, accountId, monthLabel: `${today.getFullYear()}. ${String(today.getMonth() + 1).padStart(2, '0')}월` }); };
       const executeCloseMonth = (e) => {
         e.preventDefault();
-        const { accountId, monthLabel } = closeMonthModal;
-        const accountBlocks = blocks.filter(b => b.accountId === accountId);
-        const blocksSnapshot = accountBlocks.map(b => {
-          const normalizedBlock = normalizeBlock(b);
-          return { id: createId('snap'), label: normalizedBlock.label, amount: normalizedBlock.amount, color: normalizedBlock.color || 'none', isPlanned: !!normalizedBlock.isPlanned, subItems: normalizedBlock.subItems };
-        });
-        setAccountsData(prev => prev.map(acc => {
-          if (acc.id === accountId) {
-            const newReport = { id: createId('rep'), month: monthLabel, blocks: blocksSnapshot };
-            return { ...acc, reportData: [newReport, ...(acc.reportData || [])] };
-          }
-          return acc;
-        }));
+        const accountBlocks = blocks.filter(b => b.accountId === closeMonthModal.accountId);
+        const blocksSnapshot = accountBlocks.map(b => ({ id: createId('snap'), label: b.label, amount: getBlockAmount(b), color: b.color || 'none', isPlanned: !!b.isPlanned, subItems: b.subItems }));
+        setAccountsData(prev => prev.map(acc => acc.id === closeMonthModal.accountId ? { ...acc, reportData: [{ id: createId('rep'), month: closeMonthModal.monthLabel, blocks: blocksSnapshot }, ...(acc.reportData || [])] } : acc));
         setCloseMonthModal({ isOpen: false, accountId: null, monthLabel: '' });
       };
 
       const handleReportBlockChange = (reportId, blockId, field, value) => {
-        setAccountsData(prev => prev.map(acc => {
-          if (acc.id === reportModal.accountId) {
-            return {
-              ...acc, reportData: acc.reportData.map(rep => {
-                if (rep.id === reportId) {
-                  return {
-                    ...rep, blocks: rep.blocks.map(b => {
-                      if (b.id === blockId) {
-                        if (field === 'amount') {
-                          let val = value.replace(/[^0-9-]/g, '');
-                          if (val.lastIndexOf('-') > 0) val = val.replace(/-/g, '').replace(/^/, '-');
-                          return { ...b, amountString: val, amount: parseInt(val, 10) || 0 };
-                        }
-                        return { ...b, [field]: value };
-                      }
-                      return b;
-                    })
-                  };
-                }
-                return rep;
-              })
-            };
-          }
-          return acc;
-        }));
+        setAccountsData(prev => prev.map(acc => acc.id === reportModal.accountId ? { ...acc, reportData: acc.reportData.map(rep => rep.id === reportId ? { ...rep, blocks: rep.blocks.map(b => b.id === blockId ? { ...b, [field === 'amount' ? 'amountString' : field]: field === 'amount' ? value.replace(/[^0-9-]/g, '') : value, ...(field==='amount' && {amount: parseInt(value.replace(/[^0-9-]/g, ''), 10) || 0}) } : b) } : rep) } : acc));
       };
-      const addReportBlock = (reportId) => {
-        setAccountsData(prev => prev.map(acc => {
-          if (acc.id === reportModal.accountId) {
-            return {
-              ...acc, reportData: acc.reportData.map(rep => {
-                if (rep.id === reportId) return { ...rep, blocks: [...rep.blocks, { id: createId('snap'), label: '', amount: 0, amountString: '', color: 'none', isPlanned: false, subItems: [] }] };
-                return rep;
-              })
-            };
-          }
-          return acc;
-        }));
-      };
-      const deleteReportBlock = (reportId, blockId) => {
-        setAccountsData(prev => prev.map(acc => {
-          if (acc.id === reportModal.accountId) {
-            return { ...acc, reportData: acc.reportData.map(rep => { if (rep.id === reportId) return { ...rep, blocks: rep.blocks.filter(b => b.id !== blockId) }; return rep; }) };
-          }
-          return acc;
-        }));
-      };
+      const addReportBlock = (reportId) => setAccountsData(prev => prev.map(acc => acc.id === reportModal.accountId ? { ...acc, reportData: acc.reportData.map(rep => rep.id === reportId ? { ...rep, blocks: [...rep.blocks, { id: createId('snap'), label: '', amount: 0, amountString: '', color: 'none', isPlanned: false, subItems: [] }] } : rep) } : acc));
+      const deleteReportBlock = (reportId, blockId) => setAccountsData(prev => prev.map(acc => acc.id === reportModal.accountId ? { ...acc, reportData: acc.reportData.map(rep => rep.id === reportId ? { ...rep, blocks: rep.blocks.filter(b => b.id !== blockId) } : rep) } : acc));
       const deleteEntireReport = (reportId) => {
-        if(!confirm('이 결산월의 모든 내역을 삭제하시겠습니까?')) return;
-        setAccountsData(prev => prev.map(acc => {
-          if (acc.id === reportModal.accountId) return { ...acc, reportData: acc.reportData.filter(r => r.id !== reportId) };
-          return acc;
-        }));
+        openDialog('confirm', '이 결산월의 모든 내역을 삭제하시겠습니까?', '', () => {
+          setAccountsData(prev => prev.map(acc => acc.id === reportModal.accountId ? { ...acc, reportData: acc.reportData.filter(r => r.id !== reportId) } : acc));
+        });
       };
 
-      const addNewAccount = () => {
-        const newAcc = { id: createId('acc'), name: '새로운 현장', bank: '은행명', accountNo: '계좌번호 입력', icon: 'ph-fill ph-hard-hat', theme: 'slate', cardHolder: '이사님', reportData: [] };
-        setAccountsData([...accountsData, newAcc]);
-      };
+      const addNewAccount = () => setAccountsData([...accountsData, { id: createId('acc'), name: '새로운 현장', bank: '은행명', accountNo: '계좌번호 입력', icon: 'ph-fill ph-hard-hat', theme: 'slate', cardHolder: '이사님', reportData: [] }]);
       const openSettingsModal = (account) => setSettingsModal({ isOpen: true, accountData: { ...account, cardHolder: account.cardHolder || DEFAULT_CARD_HOLDERS[account.id] || '' } });
-      const saveSettings = (e) => {
-        e.preventDefault();
-        setAccountsData(prev => prev.map(acc => acc.id === settingsModal.accountData.id ? settingsModal.accountData : acc));
-        setSettingsModal({ isOpen: false, accountData: null });
-      };
-
+      const saveSettings = (e) => { e.preventDefault(); setAccountsData(prev => prev.map(acc => acc.id === settingsModal.accountData.id ? settingsModal.accountData : acc)); setSettingsModal({ isOpen: false, accountData: null }); };
+      
       const openCreateModal = (accountId) => setModal({ isOpen: true, mode: 'create', amountInput: '', blockData: { id: createId('b_new'), accountId, label: '새 내역', amount: 0, color: 'none', isPlanned: false, subItems: [] } });
-      const openEditModal = (block) => {
-        const normalizedBlock = normalizeBlock({ isPlanned: false, subItems: [], ...block });
-        setModal({ isOpen: true, mode: 'edit', amountInput: normalizedBlock.amount === 0 ? '' : formatCurrency(normalizedBlock.amount), blockData: normalizedBlock });
-      };
+      const openEditModal = (block) => setModal({ isOpen: true, mode: 'edit', amountInput: block.amount === 0 && block.subItems?.length > 0 ? '' : formatCurrency(block.amount), blockData: { ...block, subItems: block.subItems ? [...block.subItems] : [] } });
       const closeModals = () => { setModal({ isOpen: false, mode: 'create', blockData: null, amountInput: '' }); setReportModal({ isOpen: false, accountId: null }); };
       const toggleBlockPlanned = (blockId) => setBlocks(prev => prev.map(b => b.id === blockId ? { ...b, isPlanned: !b.isPlanned } : b));
       const toggleSubItems = (blockId) => setCollapsedSubItems(prev => prev.includes(blockId) ? prev.filter(id => id !== blockId) : [...prev, blockId]);
-      const saveBlock = (e) => {
-        e.preventDefault();
-        const blockToSave = normalizeBlock(modal.blockData);
-        if (modal.mode === 'create') setBlocks(prev => [...prev, blockToSave]);
-        else setBlocks(prev => prev.map(b => b.id === blockToSave.id ? blockToSave : b));
-        closeModals();
-      };
-      const deleteBlock = (blockId) => {
-        setBlocks(prev => prev.filter(b => b.id !== blockId));
-        setSelectedBlocks(prev => prev.filter(id => id !== blockId));
-        closeModals();
-      };
+      
+      const saveBlock = (e) => { e.preventDefault(); if (modal.mode === 'create') setBlocks(prev => cleanupBlocks([...prev, modal.blockData])); else setBlocks(prev => cleanupBlocks(prev.map(b => b.id === modal.blockData.id ? modal.blockData : b))); closeModals(); };
+      const deleteBlock = (blockId) => { setBlocks(prev => cleanupBlocks(prev.filter(b => b.id !== blockId))); setSelectedBlocks(prev => prev.filter(id => id !== blockId)); closeModals(); };
 
       // Modal inner Logic
       const handleAmountChange = (e) => {
-        let val = e.target.value.replace(/[^0-9-]/g, '');
-        if (val.lastIndexOf('-') > 0) val = val.replace(/-/g, '').replace(/^/, '-');
+        let val = e.target.value.replace(/[^0-9-]/g, ''); if (val.lastIndexOf('-') > 0) val = val.replace(/-/g, '').replace(/^/, '-');
         if (val === '' || val === '-') { setModal(prev => ({ ...prev, amountInput: val, blockData: { ...prev.blockData, amount: 0 } })); return; }
-        const parsed = parseInt(val, 10);
-        setModal(prev => ({ ...prev, amountInput: formatCurrency(parsed), blockData: { ...prev.blockData, amount: parsed } }));
+        setModal(prev => ({ ...prev, amountInput: formatCurrency(parseInt(val, 10)), blockData: { ...prev.blockData, amount: parseInt(val, 10) } }));
       };
       const toggleModalPlanned = () => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, isPlanned: !prev.blockData.isPlanned } }));
+      
       const handleSubItemChange = (id, field, value) => setModal(prev => {
         const newSubItems = prev.blockData.subItems.map(item => {
-          if (item.id === id) {
-            if (field === 'amount') {
-              if (getChildItems(item).length > 0) return item;
-              let val = value.replace(/[^0-9-]/g, '');
-              if (val.lastIndexOf('-') > 0) val = val.replace(/-/g, '').replace(/^/, '-');
-              return { ...item, amountString: val, amount: parseInt(val, 10) || 0 };
-            }
-            return { ...item, [field]: value };
-          }
+          if (item.id === id) return { ...item, [field === 'amount' ? 'amountString' : field]: field === 'amount' ? value.replace(/[^0-9-]/g, '') : value, ...(field==='amount' && {amount: parseInt(value.replace(/[^0-9-]/g, ''), 10) || 0}) };
           return item;
         });
-        return updateModalSubItems(prev, newSubItems);
+        return { ...prev, blockData: { ...prev.blockData, subItems: newSubItems } };
       });
-      const addSubItem = () => setModal(prev => updateModalSubItems(prev, [...(prev.blockData.subItems || []), { id: createId('s'), label: '', amount: 0, amountString: '', amountColor: 'auto', isPlanned: false, childItems: [] }]));
-      const removeSubItem = (id) => setModal(prev => updateModalSubItems(prev, prev.blockData.subItems.filter(item => item.id !== id)));
+      const addSubItem = () => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: [...(prev.blockData.subItems || []), { id: createId('s'), label: '', amount: 0, amountString: '', amountColor: 'auto', isPlanned: false, childItems: [] }] } }));
+      const removeSubItem = (id) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.filter(item => item.id !== id) } }));
       const setSubItemColor = (id, colorKey) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === id ? { ...item, amountColor: colorKey } : item) } }));
-      const addChildItem = (subItemId) => setModal(prev => {
-        const newSubItems = prev.blockData.subItems.map(item => {
-          if (item.id !== subItemId) return item;
-          let childItems = getChildItems(item).map(child => ({ ...child }));
-          // 기존 금액 자동 생성 로직 삭제됨 (요청 반영)
-          childItems.push({ id: createId('c'), label: '', amount: 0, amountString: '', amountColor: 'auto' });
-          const newAmount = childItems.reduce((sum, child) => sum + getAmountValue(child), 0);
-          return { ...item, childItems, amount: newAmount, amountString: String(newAmount) };
-        });
-        return updateModalSubItems(prev, newSubItems);
-      });
-      const handleChildItemChange = (subItemId, childId, field, value) => setModal(prev => {
-        const newSubItems = prev.blockData.subItems.map(item => {
-          if (item.id !== subItemId) return item;
-          const childItems = getChildItems(item).map(child => {
-            if (child.id !== childId) return child;
-            if (field === 'amount') {
-              let val = value.replace(/[^0-9-]/g, '');
-              if (val.lastIndexOf('-') > 0) val = val.replace(/-/g, '').replace(/^/, '-');
-              return { ...child, amountString: val, amount: parseInt(val, 10) || 0 };
-            }
-            return { ...child, [field]: value };
-          });
-          const newAmount = childItems.reduce((sum, child) => sum + getAmountValue(child), 0);
-          return { ...item, childItems, amount: newAmount, amountString: String(newAmount) };
-        });
-        return updateModalSubItems(prev, newSubItems);
-      });
-      const removeChildItem = (subItemId, childId) => setModal(prev => {
-        const newSubItems = prev.blockData.subItems.map(item => {
-          if (item.id !== subItemId) return item;
-          const childItems = getChildItems(item).filter(child => child.id !== childId);
-          const newAmount = childItems.reduce((sum, child) => sum + getAmountValue(child), 0);
-          return { ...item, childItems, amount: newAmount, amountString: String(newAmount) };
-        });
-        return updateModalSubItems(prev, newSubItems);
-      });
-      const setChildItemColor = (subItemId, childId, colorKey) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: getChildItems(item).map(child => child.id === childId ? { ...child, amountColor: colorKey } : child) } : item) } }));
       
-      const childToSubItem = (child) => {
-        const amount = getAmountValue(child);
-        return { id: createId('s_prm'), label: child.label || '이동된 항목', amount, amountString: String(amount), amountColor: child.amountColor || 'auto', isPlanned: !!child.isPlanned, childItems: [] };
-      };
-      const subItemToChildItem = (item) => {
-        const amount = getSubItemAmount(item);
-        return { id: createId('c_dmo'), label: item.label || '이동된 항목', amount, amountString: String(amount), amountColor: item.amountColor || 'auto' };
-      };
-      const recalcSubItem = (item, childItems) => {
-        const newAmount = childItems.reduce((sum, child) => sum + getAmountValue(child), 0);
-        return { ...item, childItems, amount: newAmount, amountString: String(newAmount) };
-      };
+      const addChildItem = (subItemId) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: [...(item.childItems||[]), { id: createId('c'), label: '', amount: 0, amountString: '', amountColor: 'auto' }] } : item) } }));
+      const handleChildItemChange = (subItemId, childId, field, value) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: item.childItems.map(child => child.id === childId ? { ...child, [field === 'amount' ? 'amountString' : field]: field === 'amount' ? value.replace(/[^0-9-]/g, '') : value, ...(field==='amount' && {amount: parseInt(value.replace(/[^0-9-]/g, ''), 10) || 0}) } : child) } : item) } }));
+      const removeChildItem = (subItemId, childId) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: item.childItems.filter(child => child.id !== childId) } : item) } }));
+      const setChildItemColor = (subItemId, childId, colorKey) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: item.childItems.map(child => child.id === childId ? { ...child, amountColor: colorKey } : child) } : item) } }));
 
-      // Modal Drag & Drop Handlers
-      const handleModalSubItemDragStart = (e, id) => {
-        if (['BUTTON', 'INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
-        e.stopPropagation();
-        if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id); }
-        setTimeout(() => {
-          clearAllDragStates();
-          setDraggedModalSubItemId(id);
-        }, 0);
-      };
-      const handleModalChildDragStart = (e, subItemId, childId) => {
-        if (['BUTTON', 'INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
-        e.stopPropagation();
-        if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', childId); }
-        setTimeout(() => {
-          clearAllDragStates();
-          setDraggedModalChild({ subItemId, childId });
-        }, 0);
-      };
+      // Modal Local DND (Same logic as global DND)
+      const handleModalDragStart = (e, type, id) => { if (['BUTTON', 'INPUT'].includes(e.target.tagName)) return; e.stopPropagation(); setDraggedItem({ type, id }); e.dataTransfer.effectAllowed = 'move'; };
+      const handleModalDrop = (e, targetType, targetId, position) => {
+        e.preventDefault(); e.stopPropagation(); setDragOverZone(null);
+        if (!draggedItem || draggedItem.id === targetId) { setDraggedItem(null); return; }
+        const { type, id } = draggedItem;
+        
+        setModal(prev => {
+           let extracted = null;
+           let subItems = [...(prev.blockData.subItems || [])];
+           
+           if (type === 'sub') {
+             const idx = subItems.findIndex(s => s.id === id);
+             if (idx > -1) { extracted = subItems[idx]; subItems.splice(idx, 1); }
+           } else if (type === 'child') {
+             subItems = subItems.map(s => {
+               const idx = (s.childItems||[]).findIndex(c => c.id === id);
+               if (idx > -1) { extracted = s.childItems[idx]; const next = [...s.childItems]; next.splice(idx, 1); return { ...s, childItems: next }; }
+               return s;
+             });
+           }
+           if (!extracted) return prev;
 
-      const handleModalSubItemDrop = (e, targetId) => {
-        e.preventDefault(); e.stopPropagation();
-        setDragOverId(null);
-        if (draggedModalSubItemId) {
-          if (draggedModalSubItemId === targetId) return;
-          setModal(prev => {
-            const newSubItems = [...(prev.blockData.subItems || [])];
-            const sourceIndex = newSubItems.findIndex(item => item.id === draggedModalSubItemId);
-            if (sourceIndex < 0) return prev;
-            
-            const [movedItem] = newSubItems.splice(sourceIndex, 1);
-            let insertIndex = newSubItems.length;
-            if (targetId) {
-              insertIndex = newSubItems.findIndex(item => item.id === targetId);
-            }
-            newSubItems.splice(insertIndex < 0 ? newSubItems.length : insertIndex, 0, movedItem);
-            return updateModalSubItems(prev, newSubItems);
-          });
-        } else if (draggedModalChild) {
-          setModal(prev => {
-            let movedChild = null;
-            const withoutDragged = (prev.blockData.subItems || []).map(item => {
-              let childItems = getChildItems(item).map(child => ({ ...child }));
-              if (item.id === draggedModalChild.subItemId) {
-                const currentIndex = childItems.findIndex(child => child.id === draggedModalChild.childId);
-                if (currentIndex >= 0) [movedChild] = childItems.splice(currentIndex, 1);
-                return recalcSubItem(item, childItems);
-              }
-              return { ...item, childItems };
-            });
-            if (!movedChild) return prev;
-            const movedSubItem = childToSubItem(movedChild);
-            const insertIndex = targetId ? withoutDragged.findIndex(item => item.id === targetId) : withoutDragged.length;
-            withoutDragged.splice(insertIndex < 0 ? withoutDragged.length : insertIndex, 0, movedSubItem);
-            return updateModalSubItems(prev, withoutDragged);
-          });
-        }
-        clearAllDragStates();
+           if (targetType === 'sub' && position === 'before') {
+             const idx = subItems.findIndex(s => s.id === targetId);
+             if (idx > -1) subItems.splice(idx, 0, extracted);
+           } else if (targetType === 'child') {
+             subItems = subItems.map(s => {
+               const idx = (s.childItems||[]).findIndex(c => c.id === targetId);
+               if (idx > -1) {
+                 const next = [...s.childItems];
+                 if(position === 'before') next.splice(idx, 0, extracted); else next.splice(idx+1, 0, extracted);
+                 return { ...s, childItems: next };
+               }
+               return s;
+             });
+           } else if (targetType === 'sub' && position === 'inside') {
+             subItems = subItems.map(s => {
+               if (s.id === targetId) return { ...s, childItems: [...(s.childItems||[]), extracted] };
+               return s;
+             });
+           }
+           return { ...prev, blockData: { ...prev.blockData, subItems } };
+        });
+        setDraggedItem(null);
       };
-
-      const handleModalChildDrop = (e, targetSubItemId, targetChildId) => {
-        e.preventDefault(); e.stopPropagation();
-        setDragOverId(null);
-        if (draggedModalSubItemId) {
-          setModal(prev => {
-            let movedSubItem = null;
-            const withoutDragged = (prev.blockData.subItems || []).filter(item => {
-              if (item.id === draggedModalSubItemId) { movedSubItem = normalizeSubItem(item); return false; }
-              return true;
-            });
-            if (!movedSubItem) return prev;
-            const movedChild = subItemToChildItem(movedSubItem);
-            const newSubItems = withoutDragged.map(item => {
-              if (item.id !== targetSubItemId) return item;
-              let childItems = getChildItems(item).map(child => ({ ...child }));
-              // 기존 금액 자동 생성 로직 삭제
-              let insertIndex = targetChildId ? childItems.findIndex(child => child.id === targetChildId) : childItems.length;
-              childItems.splice(insertIndex < 0 ? childItems.length : insertIndex, 0, movedChild);
-              return recalcSubItem(item, childItems);
-            });
-            return updateModalSubItems(prev, newSubItems);
-          });
-        } else if (draggedModalChild) {
-          if (draggedModalChild.subItemId === targetSubItemId && draggedModalChild.childId === targetChildId) return;
-          setModal(prev => {
-            let movedChild = null;
-            const withoutDragged = (prev.blockData.subItems || []).map(item => {
-              let childItems = getChildItems(item).map(child => ({ ...child }));
-              if (item.id === draggedModalChild.subItemId) {
-                const currentIndex = childItems.findIndex(child => child.id === draggedModalChild.childId);
-                if (currentIndex >= 0) [movedChild] = childItems.splice(currentIndex, 1);
-                return recalcSubItem(item, childItems);
-              }
-              return { ...item, childItems };
-            });
-            if (!movedChild) return prev;
-
-            const newSubItems = withoutDragged.map(item => {
-              if (item.id !== targetSubItemId) return item;
-              let childItems = getChildItems(item).map(child => ({ ...child }));
-              
-              let insertIndex = childItems.length;
-              if (targetChildId) {
-                insertIndex = childItems.findIndex(child => child.id === targetChildId);
-              }
-              childItems.splice(insertIndex < 0 ? childItems.length : insertIndex, 0, movedChild);
-              return recalcSubItem(item, childItems);
-            });
-            return updateModalSubItems(prev, newSubItems);
-          });
-        }
-        clearAllDragStates();
-      };
-
 
       return (
-        <div className="min-h-screen bg-[#F5F2EC] text-[#3D2B1F] font-sans flex flex-col overflow-x-hidden" onClick={handleBgClick}>
+        <div className="min-h-screen bg-[#F5F2EC] text-[#3D2B1F] font-sans flex flex-col overflow-x-hidden" onClick={handleBgClick} onContextMenu={(e) => { e.preventDefault(); handleBgClick(); }}>
           {isInitialLoading && (
             <div className="fixed inset-0 z-[100] bg-[#F5F2EC] flex flex-col items-center justify-center text-[#3D2B1F]">
               <div className="w-14 h-14 bg-white border border-[#E6E0D4] rounded-2xl shadow-lg flex items-center justify-center mb-5">
@@ -1242,8 +665,67 @@
               <p className="text-xs font-bold text-[#A69C8E] mt-2">클라우드 데이터 확인 후 화면을 보여드립니다.</p>
             </div>
           )}
+
+          {/* 💡 자체 내장 커스텀 팝업 (Alert / Confirm / Prompt 대체) */}
+          {dialog.isOpen && (
+            <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={closeDialog}>
+              <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 animate-in zoom-in-95 border border-[#E6E0D4]" onClick={e => e.stopPropagation()}>
+                <h3 className="text-lg font-black text-[#3D2B1F] mb-2 flex items-center gap-2">
+                  <i className={`ph-fill ${dialog.type === 'alert' ? 'ph-warning-circle text-[#C62828]' : 'ph-info text-[#0277BD]'}`} style={{fontSize: 24}}></i>
+                  {dialog.type === 'alert' ? '알림' : dialog.type === 'confirm' ? '확인' : '이름 변경'}
+                </h3>
+                <p className="text-sm font-bold text-[#6D5443] mb-5 whitespace-pre-wrap">{dialog.message}</p>
+                
+                {dialog.type === 'prompt' && (
+                  <input 
+                    type="text" autoFocus
+                    defaultValue={dialog.defaultValue}
+                    id="dialogPromptInput"
+                    className="w-full border-2 border-[#E6E0D4] rounded-xl p-3 text-sm font-bold text-[#2A1D15] focus:outline-none focus:border-[#8B5A2B] transition-colors mb-5"
+                    onKeyDown={(e) => { if(e.key === 'Enter') { e.preventDefault(); handleDialogConfirm(e.target.value); } }}
+                  />
+                )}
+
+                <div className="flex gap-2 justify-end">
+                  {dialog.type !== 'alert' && (
+                    <button onClick={closeDialog} className="px-4 py-2.5 bg-[#EFEBE4] text-[#6D5443] rounded-xl text-sm font-extrabold hover:bg-[#DFD8CE] transition-colors">취소</button>
+                  )}
+                  <button 
+                    onClick={() => {
+                      const val = dialog.type === 'prompt' ? document.getElementById('dialogPromptInput')?.value : true;
+                      handleDialogConfirm(val);
+                    }}
+                    className="px-5 py-2.5 bg-[#8B5A2B] text-white rounded-xl text-sm font-extrabold hover:bg-[#6B4423] transition-colors shadow-md"
+                  >
+                    확인
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 💡 우클릭 팝업 메뉴 (Context Menu) */}
+          {contextMenu.isOpen && (
+            <div
+              className="context-menu-enter fixed z-[9999] bg-white rounded-xl shadow-2xl border border-[#DFD8CE] py-1.5 w-36 overflow-hidden"
+              style={{ top: contextMenu.y, left: contextMenu.x }}
+            >
+              <button 
+                onClick={handleContextMenuRename} 
+                className="w-full text-left px-4 py-2.5 text-[12px] font-bold text-[#3D2B1F] hover:bg-[#F9F6F0] hover:text-[#8B5A2B] flex items-center gap-2 transition-colors"
+              >
+                <i className="ph-bold ph-pencil-simple text-[#A69C8E]"></i> 이름 변경
+              </button>
+              <div className="h-px bg-[#EFEBE4] my-1"></div>
+              <button 
+                onClick={handleContextMenuSplit} 
+                className="w-full text-left px-4 py-2.5 text-[12px] font-bold text-[#C62828] hover:bg-[#FFEBEE] flex items-center gap-2 transition-colors"
+              >
+                <i className="ph-bold ph-scissors text-[#E57373]"></i> 금액 분리
+              </button>
+            </div>
+          )}
           
-          {/* 1. 상단 글로벌 헤더 */}
           <header className="min-h-[72px] bg-[#FDFCFB] border-b border-[#E6E0D4] flex flex-wrap items-center justify-between gap-4 px-4 sm:px-8 py-3 shrink-0 sticky top-0 z-30 shadow-sm">
             <div className="flex items-center gap-3 min-w-0">
               <HwarimLogo />
@@ -1271,7 +753,6 @@
             </div>
           </header>
 
-          {/* 2. 메인 칸반 보드 영역 */}
           <div className="flex-1 overflow-x-auto overflow-y-visible p-6 hide-scrollbar relative">
             <div className="flex gap-5 items-start min-w-max">
               
@@ -1284,23 +765,18 @@
                 return (
                   <div 
                     key={account.id}
-                    onDragOver={(e) => handleDragOverItem(e, account.id)}
-                    onDragLeave={(e) => handleDragLeaveItem(e, account.id)}
-                    onDrop={(e) => { setDragOverId(null); handleDropOnColumn(e, account.id); }}
+                    onDragOver={(e) => handleDragOver(e, `column-${account.id}-bottom`)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, 'column', account.id, 'bottom', account.id)}
                     className={`w-[360px] flex flex-col rounded-xl border-2 shadow-lg overflow-hidden transition-colors duration-200 shrink-0 ${theme.panelBg}
-                      ${dragOverId === account.id ? 'border-[#8B5A2B] ring-4 ring-indigo-200 bg-[#EFEBE4]' : theme.border}
+                      ${dragOverZone === `column-${account.id}-bottom` ? 'border-[#8B5A2B] ring-4 ring-indigo-200 bg-[#EFEBE4]' : theme.border}
                     `}
                   >
-                    {/* 2-1. 패널 헤더 */}
                     <div 
                       draggable={true}
-                      onDragStart={(e) => { 
-                        if(e.dataTransfer) e.dataTransfer.effectAllowed = 'move'; 
-                        setTimeout(() => { clearAllDragStates(); setDraggedAccountId(account.id); }, 0); 
-                      }}
+                      onDragStart={(e) => handleDragStart(e, 'column', account.id)}
                       onDragEnd={clearAllDragStates}
-                      className={`px-5 py-4 bg-white border-b border-[#E6E0D4] shrink-0 ${theme.light} bg-opacity-30 cursor-grab active:cursor-grabbing select-none`}
-                      title="클릭하고 드래그하여 패널 순서 변경"
+                      className={`px-5 py-4 bg-white border-b border-[#E6E0D4] shrink-0 ${theme.light} bg-opacity-30 select-none`}
                     >
                       <div className="flex items-center gap-2 mb-1 min-w-0 pointer-events-none">
                         <i className={`ph-bold ph-dots-six-vertical text-[#A69C8E] mr-1`} style={{fontSize: 20}}></i>
@@ -1317,7 +793,6 @@
                       </div>
                     </div>
 
-                    {/* 2-2. 4버튼 툴바 */}
                     <div className="grid grid-cols-4 bg-white/60 backdrop-blur-sm border-b border-[#E6E0D4] shrink-0">
                       <button onClick={() => setReportModal({ isOpen: true, accountId: account.id })} className="py-2.5 flex flex-col items-center justify-center gap-1 hover:bg-[#EFEBE4] border-r border-[#EFEBE4] transition-colors group">
                         <i className={`ph-fill ph-chart-bar ${theme.text} opacity-70 group-hover:opacity-100 group-hover:-translate-y-0.5 transition-all`} style={{fontSize: 16}}></i>
@@ -1337,16 +812,15 @@
                       </button>
                     </div>
 
-                    {/* 2-3. 블록 리스트 영역 */}
-                    <div className="p-3 flex flex-col gap-2 flex-1 min-h-[150px]">
+                    <div className="p-3 flex flex-col gap-0 flex-1 min-h-[150px]">
                       {accountBlocks.length === 0 ? (
                         <div className="min-h-[110px] flex items-center justify-center text-xs text-[#A69C8E] border-2 border-dashed border-[#DFD8CE] rounded-lg bg-white/50 m-2 pointer-events-none">
                           내역이 없습니다.
                         </div>
                       ) : (
-                        accountBlocks.map(block => {
+                        accountBlocks.map((block, idx) => {
                           const isSelected = selectedBlocks.includes(block.id);
-                          const tagColor = COLOR_TAGS[block.color || 'none'];
+                          const tagColor = COLOR_TAGS[block.color] || COLOR_TAGS['none'];
                           const hasSubItems = block.subItems && block.subItems.length > 0;
                           const blockAmount = getBlockAmount(block);
                           const isPlanned = !!block.isPlanned;
@@ -1354,187 +828,173 @@
                            
                           return (
                             <Fragment key={block.id}>
-                              {/* 💡 대분류 간 순서 변경 존 */}
                               <div
-                                onDragOver={(e) => handleDragOverItem(e, `${block.id}_reorder`)}
-                                onDragLeave={(e) => handleDragLeaveItem(e, `${block.id}_reorder`)}
-                                onDrop={(e) => { setDragOverId(null); handleDropOnBlockReorder(e, account.id, block.id); }}
-                                className={`h-2 rounded-full transition-colors z-10 ${dragOverId === `${block.id}_reorder` ? 'bg-[#8B5A2B] scale-y-150' : 'bg-transparent'}`}
-                                title="여기에 드롭하여 순서 변경"
+                                onDragOver={(e) => handleDragOver(e, `block-${block.id}-before`)}
+                                onDragLeave={handleDragLeave}
+                                onDrop={(e) => handleDrop(e, 'block', block.id, 'before', account.id)}
+                                className={`h-2 transition-all w-full my-0.5 z-10 ${dragOverZone === `block-${block.id}-before` ? 'bg-[#8B5A2B] scale-y-150 rounded-full shadow-md' : 'bg-transparent'}`}
                               />
                               
-                              {/* 💡 대분류 몸통 (병합 처리) */}
                               <div
-                                draggable={true}
-                                onDragStart={(e) => handleDragStart(e, block.id)}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, 'block', block.id)}
+                                onDragOver={(e) => handleDragOver(e, `block-${block.id}-inside`)}
+                                onDragLeave={handleDragLeave}
+                                onDrop={(e) => handleDrop(e, 'block', block.id, 'inside', account.id)}
                                 onDragEnd={clearAllDragStates}
-                                onDragOver={(e) => handleDragOverItem(e, block.id)}
-                                onDragLeave={(e) => handleDragLeaveItem(e, block.id)}
-                                onDrop={(e) => { setDragOverId(null); handleDropOnBlockMerge(e, account.id, block.id); }}
                                 onClick={(e) => handleBlockClick(e, block.id)}
-                                onDoubleClick={(e) => openSplitModal(e, 'block', block)}
+                                onContextMenu={(e) => handleContextMenu(e, 'block', block, null, null)}
                                 className={`
                                   block-item relative flex flex-col border rounded-xl shadow-sm cursor-grab active:cursor-grabbing select-none transition-colors group/block
                                   ${isSelected ? `${theme.border} ring-1 ${theme.ring} ${theme.light} bg-opacity-40` : `${tagColor.bg} ${tagColor.border}`}
-                                  ${draggedBlockId === block.id ? 'opacity-50' : 'hover:shadow-md'}
-                                  ${dragOverId === block.id ? '!border-[#8B5A2B] ring-2 ring-[#8B5A2B] bg-[#FDFCFB]' : ''}
+                                  ${draggedItem?.id === block.id ? 'opacity-50' : 'hover:shadow-md'}
+                                  ${dragOverZone === `block-${block.id}-inside` ? '!border-[#8B5A2B] ring-2 ring-[#8B5A2B] bg-[#FDFCFB]' : ''}
                                 `}
-                                title="더블클릭: 금액 나누기 / 드래그: 병합"
                               >
-                                <div className="flex items-center p-3 pointer-events-none">
-                                  <div className="flex-1 min-w-0 pr-1">
+                                <div className="flex items-center px-3 py-3 pointer-events-none">
+                                  <div className="flex-1 min-w-0 pr-1 flex flex-col justify-center">
                                     <div className="flex items-center gap-2 mb-0.5">
-                                      <p className="truncate text-[14px] text-[#2A1D15] font-extrabold leading-tight">{block.label}</p>
-                                      {isPlanned && (
-                                        <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>
+                                      <p 
+                                        className="truncate text-[14px] text-[#2A1D15] font-extrabold leading-tight pointer-events-auto cursor-pointer hover:text-indigo-600 hover:underline decoration-dashed underline-offset-4"
+                                        onDoubleClick={(e) => { e.stopPropagation(); handleRenameLabel('block', block.id, null, null, block.label); }}
+                                      >
+                                        {block.label}
+                                      </p>
+                                      {isPlanned && <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
+                                    </div>
+                                    <div className="flex items-center gap-2 pointer-events-auto mt-0.5">
+                                      <p className={`font-mono text-[16px] font-black tracking-tight ${getAmountTextClass(blockAmount, 'auto', isPlanned)}`}>
+                                        {hasSubItems && <span className="text-[10px] font-bold text-[#A69C8E] mr-1.5 inline-block border border-[#DFD8CE] bg-white px-1.5 py-0.5 rounded align-middle shadow-sm">총합계</span>}
+                                        {blockAmount > 0 ? '+' : ''}{formatCurrency(blockAmount)}
+                                      </p>
+                                      
+                                      {/* 💡 최적화된 뱃지형 접기/펼치기 버튼 */}
+                                      {hasSubItems && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); toggleSubItems(block.id); }}
+                                          className="ml-1 flex items-center justify-center w-5 h-5 bg-[#F9F6F0] border border-[#D2B48C] text-[#8B5A2B] rounded-full hover:bg-[#EFEBE4] transition-colors shadow-sm"
+                                          title={isSubItemsCollapsed ? '세부항목 펼치기' : '세부항목 접기'}
+                                        >
+                                          <i className={`ph-bold ph-caret-${isSubItemsCollapsed ? 'down' : 'up'} text-[12px]`}></i>
+                                        </button>
                                       )}
                                     </div>
-                                    <p className={`font-mono text-[16px] font-black tracking-tight ${getAmountTextClass(blockAmount, 'auto', isPlanned)}`}>
-                                      {blockAmount > 0 ? '+' : ''}{formatCurrency(blockAmount)}
-                                    </p>
                                   </div>
 
                                   <div className="flex items-center gap-1 shrink-0 pointer-events-auto">
-                                    <div 
-                                      className="no-select-trigger p-1.5 rounded-md hover:bg-black/5 text-[#A69C8E] hover:text-[#0277BD] transition-colors cursor-pointer"
-                                      onClick={(e) => { e.stopPropagation(); openSplitModal(e, 'block', block); }}
-                                      title="금액 나누기 (분할)"
-                                    >
-                                      <i className="ph-bold ph-scissors" style={{fontSize: 16}}></i>
-                                    </div>
                                     <button
                                       type="button"
                                       className={`no-select-trigger p-1.5 rounded-md hover:bg-black/5 transition-colors cursor-pointer ${isPlanned ? 'text-[#8B5A2B] bg-[#FDF6E9]' : 'text-[#A69C8E] hover:text-[#8B5A2B]'}`}
                                       onClick={(e) => { e.stopPropagation(); toggleBlockPlanned(block.id); }}
-                                      title={isPlanned ? '현재 잔고 계산에 포함하기' : '예정금액으로 전환하여 현재 잔고에서 제외'}
                                     >
                                       <i className="ph-bold ph-clock" style={{fontSize: 16}}></i>
                                     </button>
                                     <div 
                                       className="no-select-trigger p-1.5 rounded-md hover:bg-black/5 text-[#A69C8E] hover:text-[#3D2B1F] transition-colors cursor-pointer"
                                       onClick={(e) => { e.stopPropagation(); openEditModal(block); }}
-                                      title="내역 수정"
                                     >
                                       <i className="ph-bold ph-pencil-simple" style={{fontSize: 16}}></i>
                                     </div>
                                   </div>
                                 </div>
 
-                                {hasSubItems && (
-                                  <div className="px-4 pb-3 pt-0">
-                                    <div className="border-t border-black/10 pt-2">
-                                      <button
-                                        type="button"
-                                        onClick={(e) => { e.stopPropagation(); toggleSubItems(block.id); }}
-                                        className="no-select-trigger w-full flex items-center justify-between gap-2 px-2 py-1.5 mb-2 rounded-lg bg-white/70 border border-[#DFD8CE] text-[#6D5443] hover:bg-white transition-colors cursor-pointer"
-                                        title={isSubItemsCollapsed ? '세부항목 펼치기' : '세부항목 접기'}
-                                      >
-                                        <span className="text-[11px] font-extrabold flex items-center gap-1.5">
-                                          <i className="ph-bold ph-list-bullets" style={{fontSize: 13}}></i>
-                                          하위 항목 {block.subItems.length}개
-                                        </span>
-                                        <span className="text-[10px] font-black text-[#8B5A2B] flex items-center gap-1">
-                                          {isSubItemsCollapsed ? '펼치기' : '접기'}
-                                          <i className={`ph-bold ${isSubItemsCollapsed ? 'ph-caret-down' : 'ph-caret-up'}`} style={{fontSize: 12}}></i>
-                                        </span>
-                                      </button>
-
-                                      {!isSubItemsCollapsed && (
-                                        <div className="flex flex-col">
-                                          {block.subItems.map((sub, idx) => {
-                                            const childItems = getChildItems(sub);
-                                            const subAmount = getSubItemAmount(sub);
-                                            return (
-                                              <div key={sub.id || idx} className="flex flex-col">
-                                                <div
-                                                  onDragOver={(e) => handleDragOverItem(e, `${sub.id}_reorder`)}
-                                                  onDragLeave={(e) => handleDragLeaveItem(e, `${sub.id}_reorder`)}
-                                                  onDrop={(e) => handleDropOnSubItemReorder(e, block.id, sub.id)}
-                                                  className={`h-2 rounded-full transition-colors z-10 my-0.5 ${dragOverId === `${sub.id}_reorder` ? 'bg-[#8B5A2B] scale-y-150' : 'bg-transparent'}`}
-                                                  title="여기에 드롭하여 순서 변경"
-                                                />
-                                                <div
-                                                  draggable={true}
-                                                  onDragStart={(e) => handleBoardSubItemDragStart(e, block.id, sub.id)}
-                                                  onDragEnd={clearAllDragStates}
-                                                  onDragOver={(e) => handleDragOverItem(e, sub.id)}
-                                                  onDragLeave={(e) => handleDragLeaveItem(e, sub.id)}
-                                                  onDrop={(e) => handleDropOnSubItemMerge(e, block.id, sub.id)}
-                                                  onDoubleClick={(e) => openSplitModal(e, 'sub', block, sub)}
-                                                  className={`cursor-grab active:cursor-grabbing select-none rounded-lg border bg-white/70 px-2 py-1.5 text-[#6D5443] font-medium transition-colors
-                                                    ${draggedBoardSubItem && draggedBoardSubItem.subItemId === sub.id ? 'opacity-50 border-[#8B5A2B]' : 'border-[#E6E0D4]'} 
-                                                    ${dragOverId === sub.id ? '!border-[#8B5A2B] ring-2 ring-[#8B5A2B] bg-[#FDFCFB]' : ''}
-                                                  `}
-                                                  title="더블클릭: 금액 분할 / 드래그: 다른 박스 위에 올려서 합치기"
-                                                >
-                                                  <div className="flex justify-between items-center pointer-events-none">
-                                                    <span className="truncate pr-2 flex items-center gap-1.5 pointer-events-auto">
-                                                      <i className="ph-bold ph-corner-down-right text-[#A69C8E]" style={{fontSize: 14}}></i> 
-                                                      <span className="text-[12px] font-bold text-[#3D2B1F]">{sub.label || '내용 없음'}</span>
-                                                    </span>
-                                                    <div className="flex items-center gap-2 pointer-events-auto">
-                                                      <span className={`text-[12px] font-mono font-bold ${getAmountTextClass(subAmount, sub.amountColor || 'auto', sub.isPlanned)}`}>
-                                                        {subAmount > 0 ? '+' : ''}{formatCurrency(subAmount)}
-                                                      </span>
-                                                      {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
-                                                    </div>
-                                                  </div>
-                                                  
-                                                  {(childItems.length > 0) && (
-                                                    <div className={`mt-1.5 ml-3 pl-2 border-l-2 border-[#EFEBE4] flex flex-col transition-colors`}>
-                                                      {childItems.map((child, childIdx) => (
-                                                        <div key={child.id || childIdx} className="flex flex-col">
-                                                          <div
-                                                            onDragOver={(e) => handleDragOverItem(e, `${child.id}_reorder`)}
-                                                            onDragLeave={(e) => handleDragLeaveItem(e, `${child.id}_reorder`)}
-                                                            onDrop={(e) => handleDropOnChildItemReorder(e, block.id, sub.id, child.id)}
-                                                            className={`h-1.5 rounded-full transition-colors z-10 my-0.5 ${dragOverId === `${child.id}_reorder` ? 'bg-[#8B5A2B] scale-y-150' : 'bg-transparent'}`}
-                                                            title="여기에 드롭하여 순서 변경"
-                                                          />
-                                                          <div
-                                                            draggable={true}
-                                                            onDragStart={(e) => handleBoardChildDragStart(e, block.id, sub.id, child.id)}
-                                                            onDragEnd={clearAllDragStates}
-                                                            onDragOver={(e) => handleDragOverItem(e, child.id)}
-                                                            onDragLeave={(e) => handleDragLeaveItem(e, child.id)}
-                                                            onDrop={(e) => handleDropOnChildItem(e, block.id, sub.id, child.id)}
-                                                            onDoubleClick={(e) => openSplitModal(e, 'child', block, sub, child)}
-                                                            className={`cursor-grab active:cursor-grabbing select-none flex justify-between items-center gap-2 rounded px-1.5 py-1 transition-colors
-                                                              ${draggedBoardChild && draggedBoardChild.childId === child.id ? 'opacity-50' : 'hover:bg-black/5'}
-                                                              ${dragOverId === child.id ? 'ring-2 ring-[#8B5A2B] bg-[#FDFCFB]' : ''}
-                                                            `}
-                                                            title="더블클릭: 금액 분할 / 드래그: 이동"
-                                                          >
-                                                            <span className="truncate flex items-center gap-1.5 pointer-events-none">
-                                                              <i className="ph-bold ph-arrow-elbow-down-right text-[#D2B48C]" style={{fontSize: 12}}></i>
-                                                              <span className="text-[11px] font-bold text-[#6D5443]">{child.label || '소분류 없음'}</span>
-                                                            </span>
-                                                            <span className={`text-[11px] font-mono font-bold pointer-events-none ${getAmountTextClass(child.amount, child.amountColor || 'auto')}`}>
-                                                              {child.amount > 0 ? '+' : ''}{formatCurrency(child.amount)}
-                                                            </span>
-                                                          </div>
-                                                        </div>
-                                                      ))}
-                                                      <div
-                                                        onDragOver={(e) => handleDragOverItem(e, `${sub.id}_child_bottom`)}
-                                                        onDragLeave={(e) => handleDragLeaveItem(e, `${sub.id}_child_bottom`)}
-                                                        onDrop={(e) => handleDropOnChildItemReorder(e, block.id, sub.id, null)}
-                                                        className={`h-1.5 rounded-full transition-colors z-10 mt-0.5 ${dragOverId === `${sub.id}_child_bottom` ? 'bg-[#8B5A2B] scale-y-150' : 'bg-transparent'}`}
-                                                      />
-                                                    </div>
-                                                  )}
+                                {hasSubItems && !isSubItemsCollapsed && (
+                                  <div className="px-3 pb-3 pt-0">
+                                    <div className="border-t border-black/10 pt-2 flex flex-col gap-0">
+                                      {block.subItems.map((sub, sIdx) => {
+                                        const childItems = getChildItems(sub);
+                                        const subAmount = getSubItemAmount(sub);
+                                        return (
+                                          <Fragment key={sub.id}>
+                                            <div
+                                              onDragOver={(e) => handleDragOver(e, `sub-${sub.id}-before`)}
+                                              onDragLeave={handleDragLeave}
+                                              onDrop={(e) => handleDrop(e, 'sub', sub.id, 'before', account.id)}
+                                              className={`h-1.5 w-full my-0.5 z-10 transition-all ${dragOverZone === `sub-${sub.id}-before` ? 'bg-[#8B5A2B] scale-y-150 rounded-full shadow-md' : 'bg-transparent'}`}
+                                            />
+                                            <div
+                                              draggable
+                                              onDragStart={(e) => handleDragStart(e, 'sub', sub.id)}
+                                              onDragOver={(e) => handleDragOver(e, `sub-${sub.id}-inside`)}
+                                              onDragLeave={handleDragLeave}
+                                              onDrop={(e) => handleDrop(e, 'sub', sub.id, 'inside', account.id)}
+                                              onDragEnd={clearAllDragStates}
+                                              onContextMenu={(e) => handleContextMenu(e, 'sub', block, sub, null)}
+                                              className={`cursor-grab active:cursor-grabbing select-none rounded-lg border bg-white/70 px-2 py-1.5 text-[#6D5443] font-medium transition-colors
+                                                ${draggedItem?.id === sub.id ? 'opacity-50 border-[#8B5A2B]' : 'border-[#E6E0D4]'} 
+                                                ${dragOverZone === `sub-${sub.id}-inside` ? '!border-[#8B5A2B] ring-2 ring-[#8B5A2B] bg-[#FDFCFB]' : ''}
+                                              `}
+                                            >
+                                              <div className="flex justify-between items-center pointer-events-none">
+                                                <span className="truncate pr-2 flex items-center gap-1.5 pointer-events-auto">
+                                                  <i className="ph-bold ph-corner-down-right text-[#A69C8E]" style={{fontSize: 14}}></i> 
+                                                  <span 
+                                                    className="text-[12px] font-bold text-[#3D2B1F] cursor-pointer hover:text-indigo-600 hover:underline decoration-dashed underline-offset-4"
+                                                    onDoubleClick={(e) => { e.stopPropagation(); handleRenameLabel('sub', block.id, sub.id, null, sub.label); }}
+                                                  >
+                                                    {sub.label || '내용 없음'}
+                                                  </span>
+                                                </span>
+                                                <div className="flex items-center gap-2 pointer-events-auto">
+                                                  <span className={`text-[12px] font-mono font-bold ${getAmountTextClass(subAmount, sub.amountColor || 'auto', sub.isPlanned)}`}>
+                                                    {subAmount > 0 ? '+' : ''}{formatCurrency(subAmount)}
+                                                  </span>
+                                                  {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
                                                 </div>
                                               </div>
-                                            );
-                                          })}
-                                          <div
-                                            onDragOver={(e) => handleDragOverItem(e, `${block.id}_sub_bottom`)}
-                                            onDragLeave={(e) => handleDragLeaveItem(e, `${block.id}_sub_bottom`)}
-                                            onDrop={(e) => handleDropOnSubItemReorder(e, block.id, null)}
-                                            className={`h-2 rounded-full transition-colors z-10 mt-0.5 ${dragOverId === `${block.id}_sub_bottom` ? 'bg-[#8B5A2B] scale-y-150' : 'bg-transparent'}`}
-                                          />
-                                        </div>
-                                      )}
+                                              
+                                              {(childItems.length > 0) && (
+                                                <div className={`mt-1.5 ml-3 pl-2 border-l-2 border-[#EFEBE4] flex flex-col gap-0 transition-colors`}>
+                                                  {childItems.map((child, cIdx) => (
+                                                    <Fragment key={child.id}>
+                                                      <div
+                                                        onDragOver={(e) => handleDragOver(e, `child-${child.id}-before`)}
+                                                        onDragLeave={handleDragLeave}
+                                                        onDrop={(e) => handleDrop(e, 'child', child.id, 'before', account.id)}
+                                                        className={`h-1 w-full my-0.5 z-10 transition-all ${dragOverZone === `child-${child.id}-before` ? 'bg-[#8B5A2B] scale-y-150 rounded-full shadow-md' : 'bg-transparent'}`}
+                                                      />
+                                                      <div
+                                                        draggable
+                                                        onDragStart={(e) => handleDragStart(e, 'child', child.id)}
+                                                        onDragEnd={clearAllDragStates}
+                                                        onContextMenu={(e) => handleContextMenu(e, 'child', block, sub, child)}
+                                                        className={`cursor-grab active:cursor-grabbing select-none flex justify-between items-center gap-2 rounded px-1.5 py-0.5 transition-colors
+                                                          ${draggedItem?.id === child.id ? 'opacity-50' : 'hover:bg-black/5'}
+                                                        `}
+                                                      >
+                                                        <span className="truncate flex items-center gap-1.5 pointer-events-none">
+                                                          <i className="ph-bold ph-arrow-elbow-down-right text-[#D2B48C]" style={{fontSize: 12}}></i>
+                                                          <span 
+                                                            className="text-[11px] font-bold text-[#6D5443] cursor-pointer hover:text-indigo-600 hover:underline decoration-dashed underline-offset-4 pointer-events-auto"
+                                                            onDoubleClick={(e) => { e.stopPropagation(); handleRenameLabel('child', block.id, sub.id, child.id, child.label); }}
+                                                          >
+                                                            {child.label || '소분류 없음'}
+                                                          </span>
+                                                        </span>
+                                                        <span className={`text-[11px] font-mono font-bold pointer-events-none opacity-60 ${getAmountTextClass(child.amount, child.amountColor || 'auto')}`}>
+                                                          {child.amount > 0 ? '+' : ''}{formatCurrency(child.amount)}
+                                                        </span>
+                                                      </div>
+                                                    </Fragment>
+                                                  ))}
+                                                  <div
+                                                    onDragOver={(e) => handleDragOver(e, `sub-${sub.id}-child-bottom`)}
+                                                    onDragLeave={handleDragLeave}
+                                                    onDrop={(e) => handleDrop(e, 'child-bottom', sub.id, 'append', account.id)}
+                                                    className={`h-1.5 rounded-full transition-colors z-10 mt-0.5 ${dragOverZone === `sub-${sub.id}-child-bottom` ? 'bg-[#8B5A2B] scale-y-150' : 'bg-transparent'}`}
+                                                  />
+                                                </div>
+                                              )}
+                                            </div>
+                                          </Fragment>
+                                        );
+                                      })}
+                                      <div
+                                        onDragOver={(e) => handleDragOver(e, `block-${block.id}-sub-bottom`)}
+                                        onDragLeave={handleDragLeave}
+                                        onDrop={(e) => handleDrop(e, 'sub-bottom', block.id, 'append', account.id)}
+                                        className={`h-2 rounded-full transition-colors z-10 mt-0.5 ${dragOverZone === `block-${block.id}-sub-bottom` ? 'bg-[#8B5A2B] scale-y-150' : 'bg-transparent'}`}
+                                      />
                                     </div>
                                   </div>
                                 )}
@@ -1544,16 +1004,14 @@
                         })
                       )}
                       
-                      {/* 💡 패널 맨 아랫부분 이동용 드롭존 */}
                       <div 
-                        onDragOver={(e) => handleDragOverItem(e, `${account.id}_bottom`)}
-                        onDragLeave={(e) => handleDragLeaveItem(e, `${account.id}_bottom`)}
-                        onDrop={(e) => { setDragOverId(null); handleDropOnColumn(e, account.id); }}
-                        className={`flex-1 min-h-[40px] transition-colors rounded-lg ${dragOverId === `${account.id}_bottom` ? 'bg-[#EFEBE4] ring-2 ring-[#8B5A2B] border-2 border-dashed border-[#8B5A2B]' : 'bg-transparent'}`}
+                        onDragOver={(e) => handleDragOver(e, `column-${account.id}-bottom`)}
+                        onDragLeave={handleDragLeave}
+                        onDrop={(e) => handleDrop(e, 'column', account.id, 'bottom', account.id)}
+                        className="flex-1 min-h-[40px] mt-2 transition-colors rounded-lg bg-transparent"
                       />
                     </div>
 
-                    {/* 2-4. 잔고 하단 표시 */}
                     <div className="p-5 bg-white border-t border-[#E6E0D4] rounded-b-xl shrink-0">
                       <div className="flex justify-between items-end">
                         <span className="text-xs font-black text-[#6D5443] uppercase tracking-widest">현재 잔고</span>
@@ -1566,7 +1024,6 @@
                 );
               })}
 
-              {/* === 새로운 현장 추가 버튼 (컬럼) === */}
               <div 
                 onClick={addNewAccount}
                 className="w-[360px] min-h-[220px] flex flex-col justify-center items-center bg-[#FDFCFB]/60 hover:bg-white rounded-xl border-2 border-dashed border-[#DFD8CE] hover:border-[#8B5A2B] shadow-sm transition-colors cursor-pointer group shrink-0"
@@ -1726,7 +1183,7 @@
             </div>
           )}
 
-          {/* --- 모달: 결산 내역서 (가로 스크롤 보드형) --- */}
+          {/* --- 모달: 결산 내역서 --- */}
           {reportModal.isOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-[#2A1D15]/80 backdrop-blur-sm">
               <div className="bg-[#FDFCFB] rounded-2xl w-[95vw] shadow-2xl overflow-hidden flex flex-col h-[90vh] animate-in zoom-in-95 border border-[#E6E0D4]">
@@ -1744,7 +1201,6 @@
                   <button onClick={closeModals} className="p-2 bg-[#EFEBE4] hover:bg-[#DFD8CE] rounded-full text-[#6D5443] transition-colors"><i className="ph-bold ph-x" style={{fontSize: 20}}></i></button>
                 </div>
 
-                {/* 가로로 나열되는 리스트 */}
                 <div className="flex flex-1 overflow-x-auto p-8 gap-6 bg-[#F5F2EC] custom-scrollbar items-start">
                   {(() => {
                     const reportAccount = accountsData.find(a => a.id === reportModal.accountId);
@@ -1765,7 +1221,6 @@
                       
                       return (
                         <div key={activeReport.id} className="w-[400px] shrink-0 bg-white border border-[#E6E0D4] rounded-2xl shadow-md flex flex-col max-h-full">
-                          
                           <div className="p-5 border-b border-[#E6E0D4] flex justify-between items-end shrink-0 bg-[#FCFAF8] rounded-t-2xl">
                             <h2 className="text-2xl font-black text-[#2A1D15]">{activeReport.month}</h2>
                             <div className="text-right">
@@ -1775,10 +1230,9 @@
                               </p>
                             </div>
                           </div>
-
                           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col gap-2">
                             {activeReport.blocks.map(block => {
-                              const tagColor = COLOR_TAGS[block.color || 'none'];
+                              const tagColor = COLOR_TAGS[block.color] || COLOR_TAGS['none'];
                               const isPlanned = !!block.isPlanned;
                               const hasSubItems = block.subItems && block.subItems.length > 0;
                               const blockAmount = getBlockAmount(block);
@@ -1792,9 +1246,7 @@
                                         className="flex-1 w-0 bg-transparent font-extrabold text-[14px] text-[#2A1D15] border-b border-transparent focus:border-[#DFD8CE] hover:border-black/10 px-1 py-1 focus:outline-none transition-colors"
                                         placeholder="항목/적요명"
                                       />
-                                      {isPlanned && (
-                                        <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>
-                                      )}
+                                      {isPlanned && <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
                                       <input 
                                         type="text" value={hasSubItems ? formatCurrency(blockAmount) : (block.amountString != null ? block.amountString : (block.amount === 0 ? '' : block.amount))}
                                         readOnly={hasSubItems}
@@ -1852,7 +1304,6 @@
                                 </div>
                               );
                             })}
-                            
                             <button onClick={() => addReportBlock(activeReport.id)} className="mt-2 w-full py-3.5 border-2 border-dashed border-[#DFD8CE] text-[#8B5A2B] rounded-xl text-sm font-bold hover:bg-[#F9F6F0] hover:border-[#B39977] transition-colors flex items-center justify-center gap-2">
                               <i className="ph-bold ph-plus" style={{fontSize: 16}}></i> 누락된 내역 행 추가
                             </button>
@@ -1872,9 +1323,9 @@
             </div>
           )}
 
-          {/* --- 모달: 메인 블록 생성/수정 --- */}
+          {/* --- 💡 모달: 메인 블록 생성/수정 --- */}
           {modal.isOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#2A1D15]/60 backdrop-blur-sm">
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#2A1D15]/60 backdrop-blur-sm" onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}>
               <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 border border-[#E6E0D4]">
                 
                 <div className="flex justify-between items-center p-5 border-b border-[#EFEBE4] bg-[#FDFCFB]">
@@ -1887,9 +1338,23 @@
 
                 <form onSubmit={saveBlock} className="p-6 max-h-[75vh] overflow-y-auto custom-scrollbar">
                   
-                  <div className="mb-5">
-                    <label className="block text-xs font-extrabold text-[#6D5443] mb-2 uppercase">항목 박스 이름</label>
-                    <input type="text" required value={modal.blockData.label} onChange={(e) => setModal(p => ({...p, blockData: {...p.blockData, label: e.target.value}}))} className="w-full border-2 border-[#E6E0D4] rounded-xl p-3 text-sm font-bold text-[#2A1D15] focus:outline-none focus:border-[#8B5A2B] transition-colors" placeholder="예: 건축주 입금액, 장비대금 등"/>
+                  <div className="mb-5 flex flex-col sm:flex-row gap-3">
+                    <div className="flex-[2]">
+                      <label className="block text-xs font-extrabold text-[#6D5443] mb-2 uppercase">항목 박스 이름</label>
+                      <input type="text" required value={modal.blockData.label} onChange={(e) => setModal(p => ({...p, blockData: {...p.blockData, label: e.target.value}}))} className="w-full border-2 border-[#E6E0D4] rounded-xl p-3 text-sm font-bold text-[#2A1D15] focus:outline-none focus:border-[#8B5A2B] transition-colors" placeholder="예: 건축주 입금액, 장비대금 등"/>
+                    </div>
+                    {/* 💡 자체 금액 입력칸: 하위 항목이 있으면 숨김 */}
+                    {(!modal.blockData.subItems || modal.blockData.subItems.length === 0) && (
+                      <div className="flex-1">
+                        <label className="block text-xs font-extrabold text-[#6D5443] mb-2 uppercase text-right">자체 금액</label>
+                        <input 
+                          type="text" required 
+                          value={modal.amountInput} onChange={handleAmountChange} 
+                          className={`w-full border-2 border-[#E6E0D4] rounded-xl p-3 text-sm font-mono font-black text-right text-[#2A1D15] focus:outline-none focus:border-[#8B5A2B] transition-colors ${getAmountTextClass(modal.blockData.amount, 'auto', modal.blockData.isPlanned)}`} 
+                          placeholder="0"
+                        />
+                      </div>
+                    )}
                   </div>
 
                   <div className="mb-6">
@@ -1929,35 +1394,24 @@
                     </div>
                     
                     {modal.blockData.subItems && modal.blockData.subItems.length > 0 ? (
-                      <div
-                        onDragOver={handleGenericDragOver}
-                        onDrop={(e) => handleModalSubItemDrop(e, null)}
-                        className="space-y-3 mb-3"
-                      >
-                        {/* === 모달 내부 중분류 리스트 === */}
+                      <div className="space-y-3 mb-3">
                         {modal.blockData.subItems.map((sub, idx) => {
                           const childItems = getChildItems(sub);
                           const hasChildItems = childItems.length > 0;
                           return (
-                          <div
-                            key={sub.id}
-                            onDragOver={handleGenericDragOver}
-                            onDrop={(e) => handleModalSubItemDrop(e, sub.id)}
-                            className={`rounded-lg border bg-white p-3 shadow-sm transition-colors select-none ${draggedModalSubItemId === sub.id ? 'opacity-50 border-[#8B5A2B]' : 'border-[#E6E0D4]'}`}
-                          >
+                          <div key={sub.id} className="rounded-lg border bg-white p-3 shadow-sm transition-colors">
                             <div className="flex gap-2 items-start">
-                              <div
-                                draggable={true}
-                                onDragStart={(e) => handleModalSubItemDragStart(e, sub.id)}
-                                onDragEnd={clearAllDragStates}
-                                className="shrink-0 mt-1.5 flex items-center justify-center p-1.5 rounded bg-[#F9F6F0] text-[#A69C8E] cursor-grab active:cursor-grabbing hover:bg-[#EFEBE4] hover:text-[#8B5A2B] transition-colors"
-                                title="드래그해서 위아래로 이동"
-                              >
-                                <i className="ph-bold ph-arrows-down-up" style={{fontSize: 14}}></i>
-                              </div>
                               <div className="flex-1 space-y-2">
                                 <input type="text" value={sub.label} onChange={(e) => handleSubItemChange(sub.id, 'label', e.target.value)} placeholder="하위 항목 이름 (예: 장비대)" className="w-full text-[12px] font-bold border border-[#DFD8CE] rounded p-2 focus:outline-none focus:border-[#8B5A2B]" required/>
-                                <input type="text" value={hasChildItems ? formatCurrency(getSubItemAmount(sub)) : (sub.amountString != null ? sub.amountString : (sub.amount === 0 ? '' : sub.amount))} onChange={(e) => handleSubItemChange(sub.id, 'amount', e.target.value)} readOnly={hasChildItems} placeholder="금액 입력" className={`w-full text-xs font-mono font-bold border border-[#DFD8CE] rounded p-2 text-right focus:outline-none focus:border-[#8B5A2B] ${hasChildItems ? 'bg-[#F9F6F0] cursor-not-allowed' : ''} ${getAmountTextClass(getSubItemAmount(sub), sub.amountColor || 'auto', sub.isPlanned)}`} required/>
+                                {/* 💡 자체 금액 입력칸: 소분류가 생기면 입력 막힘, 순수 자기 금액만 입력 */}
+                                {!hasChildItems ? (
+                                  <input type="text" value={sub.amountString != null ? sub.amountString : (sub.amount === 0 ? '' : sub.amount)} onChange={(e) => handleSubItemChange(sub.id, 'amount', e.target.value)} placeholder="금액 입력" className={`w-full text-xs font-mono font-bold border border-[#DFD8CE] rounded p-2 text-right focus:outline-none focus:border-[#8B5A2B] ${getAmountTextClass(sub.amount, sub.amountColor || 'auto', sub.isPlanned)}`} required/>
+                                ) : (
+                                  <div className="flex justify-between items-center p-2 bg-[#F9F6F0] border border-[#DFD8CE] rounded text-right text-xs font-mono font-bold text-[#A69C8E]">
+                                    <span className="text-[10px]">소분류 합계 표시안함</span>
+                                    <span>-</span>
+                                  </div>
+                                )}
                               </div>
                               <div className="flex flex-col gap-1">
                                 <button type="button" onClick={() => removeSubItem(sub.id)} className="p-1.5 text-[#C62828] bg-white border border-[#DFD8CE] rounded hover:bg-[#FFEBEE]" title="삭제">
@@ -1997,14 +1451,10 @@
                               </div>
                             </div>
 
-                            <div
-                              onDragOver={handleGenericDragOver}
-                              onDrop={(e) => handleModalChildDrop(e, sub.id, null)}
-                              className="mt-3 pt-3 border-t border-[#EFEBE4] bg-[#FCFAF8] rounded-lg p-2"
-                            >
+                            <div className="mt-3 pt-3 border-t border-[#EFEBE4] bg-[#FCFAF8] rounded-lg p-2">
                               <div className="flex items-center justify-between gap-2 mb-2">
                                 <span className="text-[10px] font-extrabold text-[#6D5443] flex items-center gap-1.5">
-                                  <i className="ph-bold ph-arrow-elbow-down-right" style={{fontSize: 13}}></i> 세부 항목
+                                  <i className="ph-bold ph-arrow-elbow-down-right" style={{fontSize: 13}}></i> 세부 항목 (소분류)
                                 </span>
                                 <button type="button" onClick={() => addChildItem(sub.id)} className="text-[10px] bg-white border border-[#DFD8CE] text-[#8B5A2B] px-2 py-1 rounded font-bold hover:bg-[#F9F6F0] transition-colors">+ 세부항목 추가</button>
                               </div>
@@ -2013,22 +1463,8 @@
                               {childItems.length > 0 ? (
                                 <div className="space-y-2">
                                   {childItems.map((child, childIdx) => (
-                                    <div
-                                      key={child.id}
-                                      onDragOver={handleGenericDragOver}
-                                      onDrop={(e) => handleModalChildDrop(e, sub.id, child.id)}
-                                      className={`rounded-md border border-[#DFD8CE] bg-white p-2 transition-colors select-none ${draggedModalChild && draggedModalChild.childId === child.id ? 'opacity-50 border-[#8B5A2B]' : ''}`}
-                                    >
+                                    <div key={child.id} className="rounded-md border border-[#DFD8CE] bg-white p-2 transition-colors select-none">
                                       <div className="flex gap-2 items-start">
-                                        <div
-                                          draggable={true}
-                                          onDragStart={(e) => handleModalChildDragStart(e, sub.id, child.id)}
-                                          onDragEnd={clearAllDragStates}
-                                          className="shrink-0 mt-1.5 flex items-center justify-center p-1 rounded bg-[#F9F6F0] text-[#A69C8E] cursor-grab active:cursor-grabbing hover:bg-[#EFEBE4] hover:text-[#8B5A2B] transition-colors"
-                                          title="드래그해서 위아래로 이동"
-                                        >
-                                          <i className="ph-bold ph-arrows-down-up" style={{fontSize: 12}}></i>
-                                        </div>
                                         <div className="flex-1 space-y-1.5">
                                           <input type="text" value={child.label} onChange={(e) => handleChildItemChange(sub.id, child.id, 'label', e.target.value)} placeholder="세부 내용" className="w-full text-[11px] font-bold border border-[#DFD8CE] rounded p-2 focus:outline-none focus:border-[#8B5A2B]" />
                                           <input type="text" value={child.amountString != null ? child.amountString : (child.amount === 0 ? '' : child.amount)} onChange={(e) => handleChildItemChange(sub.id, child.id, 'amount', e.target.value)} placeholder="금액" className={`w-full text-xs font-mono font-bold border border-[#DFD8CE] rounded p-2 text-right focus:outline-none focus:border-[#8B5A2B] ${getAmountTextClass(child.amount, child.amountColor || 'auto')}`} />
@@ -2038,25 +1474,6 @@
                                             <i className="ph-bold ph-trash" style={{fontSize: 12}}></i>
                                           </button>
                                         </div>
-                                      </div>
-                                      <div className="flex flex-wrap gap-1 mt-2">
-                                        {SUBITEM_COLOR_ORDER.map(colorKey => {
-                                          const color = SUBITEM_AMOUNT_COLORS[colorKey];
-                                          const isActiveChildColor = (child.amountColor || 'auto') === colorKey;
-                                          return (
-                                            <button
-                                              key={colorKey}
-                                              type="button"
-                                              onClick={() => setChildItemColor(sub.id, child.id, colorKey)}
-                                              className={`px-2 py-1 rounded-full border text-[9px] font-extrabold flex items-center gap-1 transition-all
-                                                ${isActiveChildColor ? 'border-[#8B5A2B] bg-[#F9F6F0] text-[#3D2B1F] ring-1 ring-[#8B5A2B]' : 'border-[#DFD8CE] bg-white text-[#6D5443] hover:bg-[#F9F6F0]'}
-                                              `}
-                                            >
-                                              <span className={`w-2.5 h-2.5 rounded-full border border-black/10 ${color.swatch}`}></span>
-                                              {color.label}
-                                            </button>
-                                          );
-                                        })}
                                       </div>
                                     </div>
                                   ))}
@@ -2070,18 +1487,19 @@
                         })}
                       </div>
                     ) : (
-                      <p className="text-[11px] text-[#A69C8E] font-medium text-center py-2">다른 박스를 이 위로 <strong>드래그 & 드롭</strong> 하시면<br/>자동으로 하위 항목으로 합쳐집니다.</p>
+                      <p className="text-[11px] text-[#A69C8E] font-medium text-center py-2">수정창에서는 드래그 앤 드롭이 비활성화됩니다.<br/>메인 보드 화면에서 박스를 합치거나 뺄 수 있습니다.</p>
                     )}
                   </div>
 
                   <div className="mb-6">
-                    <label className="block text-xs font-extrabold text-[#6D5443] mb-2 uppercase flex items-center gap-1.5"><i className="ph-fill ph-currency-circle-dollar" style={{fontSize: 14}}></i> 최종 합계 금액</label>
+                    <label className="block text-xs font-extrabold text-[#6D5443] mb-2 uppercase flex items-center justify-between gap-1.5">
+                      <span className="flex items-center gap-1.5"><i className="ph-fill ph-currency-circle-dollar" style={{fontSize: 14}}></i> 최종 합계 금액 <span className="text-[10px] font-normal opacity-80">(박스 자체 + 중분류)</span></span>
+                    </label>
                     <input
-                      type="text" required readOnly={modal.blockData.subItems && modal.blockData.subItems.length > 0}
-                      value={modal.amountInput} onChange={handleAmountChange}
-                      className={`w-full border-2 border-[#E6E0D4] rounded-xl p-3 text-xl font-mono font-black text-right focus:outline-none transition-colors
-                        ${(modal.blockData.subItems && modal.blockData.subItems.length > 0) ? 'bg-[#EFEBE4] text-[#6D5443] cursor-not-allowed' : 'bg-white focus:border-[#8B5A2B]'}
-                        ${getAmountTextClass(modal.blockData.amount, 'auto', modal.blockData.isPlanned)}
+                      type="text" readOnly
+                      value={formatCurrency(getBlockAmount(modal.blockData))}
+                      className={`w-full border-2 border-[#E6E0D4] rounded-xl p-3 text-xl font-mono font-black text-right bg-[#EFEBE4] text-[#6D5443] cursor-not-allowed transition-colors
+                        ${getAmountTextClass(getBlockAmount(modal.blockData), 'auto', modal.blockData.isPlanned)}
                       `}
                       placeholder="0"
                     />
@@ -2118,7 +1536,6 @@
       );
     }
 
-    // 렌더링 실행
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
