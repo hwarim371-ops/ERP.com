@@ -313,12 +313,26 @@
         return null;
       };
 
+      const collectAmountEntries = (item) => {
+        const entries = [];
+        const visit = (current) => {
+          if (!current) return;
+          const amount = getAmountValue(current);
+          if (amount !== 0) entries.push({ amount, isPlanned: !!current.isPlanned });
+          (current.subItems || []).forEach(visit);
+          getChildItems(current).forEach(visit);
+        };
+        visit(item);
+        return entries;
+      };
+
       const getTotalsForBlocks = (targetBlocks) => {
         const totals = targetBlocks.reduce((acc, block) => {
-          const amount = getBlockAmount(block);
-          if (amount > 0) acc.income += amount;
-          if (amount < 0) acc.expense += Math.abs(amount);
-          acc.credit += getCreditAmount(block);
+          collectAmountEntries(block).forEach(({ amount, isPlanned }) => {
+            if (amount > 0) acc.income += amount;
+            if (amount < 0) acc.expense += Math.abs(amount);
+            if (isPlanned) acc.credit += amount;
+          });
           return acc;
         }, { income: 0, expense: 0, credit: 0 });
         return { ...totals, balance: totals.income - totals.expense };
