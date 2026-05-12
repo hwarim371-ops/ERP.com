@@ -338,12 +338,18 @@
         const totals = targetBlocks.reduce((acc, block) => {
           collectAmountEntries(block).forEach(({ amount, isPlanned }) => {
             if (amount > 0) acc.income += amount;
-            if (amount < 0 && !isPlanned) acc.expense += Math.abs(amount);
+            if (amount < 0) acc.expense += Math.abs(amount);
+            if (amount < 0 && isPlanned) acc.creditExpense += Math.abs(amount);
             if (isPlanned) acc.credit += amount;
           });
           return acc;
-        }, { income: 0, expense: 0, credit: 0 });
-        return { ...totals, balance: totals.income - totals.expense };
+        }, { income: 0, expense: 0, creditExpense: 0, credit: 0 });
+        const actualExpense = Math.max(0, totals.expense - totals.income - totals.creditExpense);
+        const balance = targetBlocks.reduce((sum, block) => {
+          const blockAmount = getBlockAmount(block);
+          return blockAmount > 0 ? sum + blockAmount : sum;
+        }, 0);
+        return { ...totals, expense: actualExpense, balance };
       };
 
       const selectedItems = useMemo(() => selectedBlocks.map(resolveSelectionItem).filter(Boolean), [blocks, selectedBlocks]);
