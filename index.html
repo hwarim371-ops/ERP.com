@@ -152,6 +152,7 @@
       const [closeMonthModal, setCloseMonthModal] = useState({ isOpen: false, accountId: null, monthLabel: '' });
       const [settingsModal, setSettingsModal] = useState({ isOpen: false, accountData: null });
       const [contextMenu, setContextMenu] = useState({ isOpen: false, x: 0, y: 0, target: null });
+      const [colorModal, setColorModal] = useState({ isOpen: false, target: null, currentColor: 'none' });
       const [dialog, setDialog] = useState({ isOpen: false, type: '', message: '', defaultValue: '', onConfirm: null });
       
       const [isSyncing, setIsSyncing] = useState(false);
@@ -190,11 +191,39 @@
         }
         return getAmountValue(block);
       };
+
+      const getChildEffectiveAmount = (child) => child && !child.isPlanned ? getAmountValue(child) : 0;
+
+      const getSubEffectiveAmount = (sub) => {
+        if (!sub || sub.isPlanned) return 0;
+        const children = getChildItems(sub);
+        if (children.length > 0) return children.reduce((sum, child) => sum + getChildEffectiveAmount(child), 0);
+        return getSubItemAmount(sub);
+      };
+
+      const getChildCreditAmount = (child) => child && child.isPlanned ? getAmountValue(child) : 0;
+
+      const getSubCreditAmount = (sub) => {
+        if (!sub) return 0;
+        if (sub.isPlanned) return getSubItemAmount(sub);
+        const children = getChildItems(sub);
+        if (children.length > 0) return children.reduce((sum, child) => sum + getChildCreditAmount(child), 0);
+        return 0;
+      };
+
+      const getCreditAmount = (block) => {
+        if (!block) return 0;
+        if (block.isPlanned) return getBlockAmount(block);
+        if (block.subItems && block.subItems.length > 0) {
+          return block.subItems.reduce((sum, sub) => sum + getSubCreditAmount(sub), 0);
+        }
+        return 0;
+      };
       
       const getEffectiveAmount = (block) => {
         if (!block || block.isPlanned) return 0;
         if (block.subItems && block.subItems.length > 0) {
-          return block.subItems.reduce((sum, sub) => sum + (sub.isPlanned ? 0 : getSubItemAmount(sub)), 0);
+          return block.subItems.reduce((sum, sub) => sum + getSubEffectiveAmount(sub), 0);
         }
         return getAmountValue(block);
       };
@@ -218,7 +247,7 @@
             // 중분류 알맹이가 1개고 자체금액이 0이면 자동 언랩 (소분류 -> 중분류 승격)
             if (newChildren.length === 1 && getAmountValue(s) === 0) {
               const singleChild = newChildren[0];
-              return { ...s, label: s.label || singleChild.label, amount: getAmountValue(singleChild), amountColor: singleChild.amountColor, childItems: [] };
+              return { ...s, label: s.label || singleChild.label, amount: getAmountValue(singleChild), amountColor: singleChild.amountColor, isPlanned: !!(s.isPlanned || singleChild.isPlanned), childItems: [] };
             }
             return { ...s, childItems: newChildren };
           }).filter(s => !(s.childItems.length === 0 && getAmountValue(s) === 0));
@@ -252,10 +281,48 @@
       };
       const toChild = (item) => {
         const validColor = SUBITEM_AMOUNT_COLORS[item.amountColor] ? item.amountColor : (SUBITEM_AMOUNT_COLORS[item.color] ? item.color : 'auto');
-        return { id: createId('c'), label: item.label || '새 항목', amount: getUniversalAmount(item), amountColor: validColor };
+        return { id: createId('c'), label: item.label || '새 항목', amount: getUniversalAmount(item), amountColor: validColor, isPlanned: !!item.isPlanned };
       };
 
-      const selectedSum = useMemo(() => blocks.filter(b => selectedBlocks.includes(b.id)).reduce((sum, b) => sum + getEffectiveAmount(b), 0), [blocks, selectedBlocks]);
+      const getSelectionKey = (type, id) => `${type}:${id}`;
+      const splitSelectionKey = (selectionKey) => {
+        if (!selectionKey) return { type: '', id: '' };
+        if (!selectionKey.includes(':')) return { type: 'block', id: selectionKey };
+        const [type, id] = selectionKey.split(':');
+        return { type, id };
+      };
+      const getTargetId = (type, block, subItem, childItem) => type === 'block' ? block?.id : type === 'sub' ? subItem?.id : childItem?.id;
+      const isItemSelected = (type, id) => selectedBlocks.includes(getSelectionKey(type, id)) || (type === 'block' && selectedBlocks.includes(id));
+      const resolveSelectionItem = (selectionKey) => {
+        const { type, id } = splitSelectionKey(selectionKey);
+        for (const block of blocks) {
+          if (type === 'block' && block.id === id) {
+            return { key: getSelectionKey('block', block.id), type, id, blockId: block.id, label: block.label, amount: getEffectiveAmount(block) };
+          }
+          for (const sub of (block.subItems || [])) {
+            if (type === 'sub' && sub.id === id) {
+              return { key: getSelectionKey('sub', sub.id), type, id, blockId: block.id, subItemId: sub.id, label: sub.label, amount: getSubEffectiveAmount(sub) };
+            }
+            for (const child of getChildItems(sub)) {
+              if (type === 'child' && child.id === id) {
+                return { key: getSelectionKey('child', child.id), type, id, blockId: block.id, subItemId: sub.id, childId: child.id, label: child.label, amount: getChildEffectiveAmount(child) };
+              }
+            }
+          }
+        }
+        return null;
+      };
+
+      const selectedItems = useMemo(() => selectedBlocks.map(resolveSelectionItem).filter(Boolean), [blocks, selectedBlocks]);
+      const selectedSum = useMemo(() => selectedItems.reduce((sum, item) => sum + item.amount, 0), [selectedItems]);
+      const boardTotals = useMemo(() => blocks.reduce((totals, block) => {
+        const amount = getEffectiveAmount(block);
+        if (amount > 0) totals.income += amount;
+        if (amount < 0) totals.expense += amount;
+        totals.credit += getCreditAmount(block);
+        totals.balance += amount;
+        return totals;
+      }, { income: 0, expense: 0, credit: 0, balance: 0 }), [blocks]);
 
       useEffect(() => {
         if (!GAS_URL || GAS_URL.includes("여기에")) { setIsInitialLoading(false); return; }
@@ -348,6 +415,41 @@
         const { type, block, subItem, childItem } = contextMenu.target;
         openSplitModal(null, type, block, subItem, childItem);
         closeContextMenu();
+      };
+
+      const updateTargetItem = (type, blockId, subItemId, childId, updater) => {
+        setBlocks(prev => prev.map(b => {
+          if (b.id !== blockId) return b;
+          if (type === 'block') return updater(b);
+          const newSubs = (b.subItems || []).map(s => {
+            if (s.id !== subItemId) return s;
+            if (type === 'sub') return updater(s);
+            if (type === 'child') {
+              return { ...s, childItems: getChildItems(s).map(c => c.id === childId ? updater(c) : c) };
+            }
+            return s;
+          });
+          return { ...b, subItems: newSubs };
+        }));
+      };
+
+      const handleContextMenuCredit = () => {
+        const { type, block, subItem, childItem } = contextMenu.target;
+        updateTargetItem(type, block.id, subItem?.id, childItem?.id, (item) => ({ ...item, isPlanned: !item.isPlanned }));
+        closeContextMenu();
+      };
+
+      const handleContextMenuColor = () => {
+        const target = contextMenu.target;
+        const currentColor = target.type === 'block' ? (target.block.color || 'none') : (target.type === 'sub' ? (target.subItem.amountColor || 'auto') : (target.childItem.amountColor || 'auto'));
+        setColorModal({ isOpen: true, target, currentColor });
+        closeContextMenu();
+      };
+
+      const applyContextColor = (colorKey) => {
+        const { type, block, subItem, childItem } = colorModal.target;
+        updateTargetItem(type, block.id, subItem?.id, childItem?.id, (item) => type === 'block' ? { ...item, color: colorKey } : { ...item, amountColor: colorKey });
+        setColorModal({ isOpen: false, target: null, currentColor: 'none' });
       };
 
       /* --- 💡 마스터 통합 DND 엔진 --- */
@@ -532,7 +634,7 @@
                 const newChildren = [...(s.childItems || [])]; const cIdx = newChildren.findIndex(c => c.id === splitModal.childId);
                 if (cIdx > -1) {
                   const sourceChild = newChildren[cIdx]; newChildren[cIdx] = { ...sourceChild, amount: sourceChild.amount - splitVal };
-                  newChildren.splice(cIdx + 1, 0, { id: createId('c_split'), label: `${sourceChild.label} (분리)`, amount: splitVal, amountColor: sourceChild.amountColor });
+                  newChildren.splice(cIdx + 1, 0, { id: createId('c_split'), label: `${sourceChild.label} (분리)`, amount: splitVal, amountColor: sourceChild.amountColor, isPlanned: !!sourceChild.isPlanned });
                 } return { ...s, childItems: newChildren };
               }); return { ...b, subItems: newSubs };
             });
@@ -542,12 +644,16 @@
         setSplitModal({ isOpen: false, targetType: null, blockId: null, subItemId: null, childId: null, sourceAmount: 0, amountInput: '', label: '' });
       };
 
-      const handleBlockClick = (e, blockId) => {
+      const handleItemClick = (e, type, block, subItem, childItem) => {
         if (e.target.closest('.no-select-trigger') || e.target.closest('button')) return;
-        if (e.ctrlKey || e.metaKey) setSelectedBlocks(prev => prev.includes(blockId) ? prev.filter(id => id !== blockId) : [...prev, blockId]);
-        else setSelectedBlocks(prev => (prev.length === 1 && prev[0] === blockId) ? [] : [blockId]);
+        e.stopPropagation();
+        const itemId = getTargetId(type, block, subItem, childItem);
+        if (!itemId) return;
+        const selectionKey = getSelectionKey(type, itemId);
+        if (e.ctrlKey || e.metaKey) setSelectedBlocks(prev => prev.includes(selectionKey) ? prev.filter(id => id !== selectionKey) : [...prev, selectionKey]);
+        else setSelectedBlocks(prev => (prev.length === 1 && prev[0] === selectionKey) ? [] : [selectionKey]);
       };
-      const handleBgClick = (e) => { closeContextMenu(); if (e && e.target && !e.target.closest('.block-item') && !e.target.closest('.selection-bar')) setSelectedBlocks([]); };
+      const handleBgClick = (e) => { closeContextMenu(); if (e && e.target && !e.target.closest('.selectable-item') && !e.target.closest('.selection-bar')) setSelectedBlocks([]); };
 
       /* --- 그 외 모달 관련 함수들 --- */
       const openCloseMonthModal = (accountId) => { const today = new Date(); setCloseMonthModal({ isOpen: true, accountId, monthLabel: `${today.getFullYear()}. ${String(today.getMonth() + 1).padStart(2, '0')}월` }); };
@@ -577,11 +683,11 @@
       const openCreateModal = (accountId) => setModal({ isOpen: true, mode: 'create', amountInput: '', blockData: { id: createId('b_new'), accountId, label: '새 내역', amount: 0, color: 'none', isPlanned: false, subItems: [] } });
       const openEditModal = (block) => setModal({ isOpen: true, mode: 'edit', amountInput: block.amount === 0 && block.subItems?.length > 0 ? '' : formatCurrency(block.amount), blockData: { ...block, subItems: block.subItems ? [...block.subItems] : [] } });
       const closeModals = () => { setModal({ isOpen: false, mode: 'create', blockData: null, amountInput: '' }); setReportModal({ isOpen: false, accountId: null }); };
-      const toggleBlockPlanned = (blockId) => setBlocks(prev => prev.map(b => b.id === blockId ? { ...b, isPlanned: !b.isPlanned } : b));
+      const toggleBlockPlanned = (blockId) => updateTargetItem('block', blockId, null, null, (item) => ({ ...item, isPlanned: !item.isPlanned }));
       const toggleSubItems = (blockId) => setCollapsedSubItems(prev => prev.includes(blockId) ? prev.filter(id => id !== blockId) : [...prev, blockId]);
       
       const saveBlock = (e) => { e.preventDefault(); if (modal.mode === 'create') setBlocks(prev => cleanupBlocks([...prev, modal.blockData])); else setBlocks(prev => cleanupBlocks(prev.map(b => b.id === modal.blockData.id ? modal.blockData : b))); closeModals(); };
-      const deleteBlock = (blockId) => { setBlocks(prev => cleanupBlocks(prev.filter(b => b.id !== blockId))); setSelectedBlocks(prev => prev.filter(id => id !== blockId)); closeModals(); };
+      const deleteBlock = (blockId) => { setBlocks(prev => cleanupBlocks(prev.filter(b => b.id !== blockId))); setSelectedBlocks(prev => prev.filter(key => resolveSelectionItem(key)?.blockId !== blockId)); closeModals(); };
 
       // Modal inner Logic
       const handleAmountChange = (e) => {
@@ -602,7 +708,7 @@
       const removeSubItem = (id) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.filter(item => item.id !== id) } }));
       const setSubItemColor = (id, colorKey) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === id ? { ...item, amountColor: colorKey } : item) } }));
       
-      const addChildItem = (subItemId) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: [...(item.childItems||[]), { id: createId('c'), label: '', amount: 0, amountString: '', amountColor: 'auto' }] } : item) } }));
+      const addChildItem = (subItemId) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: [...(item.childItems||[]), { id: createId('c'), label: '', amount: 0, amountString: '', amountColor: 'auto', isPlanned: false }] } : item) } }));
       const handleChildItemChange = (subItemId, childId, field, value) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: item.childItems.map(child => child.id === childId ? { ...child, [field === 'amount' ? 'amountString' : field]: field === 'amount' ? value.replace(/[^0-9-]/g, '') : value, ...(field==='amount' && {amount: parseInt(value.replace(/[^0-9-]/g, ''), 10) || 0}) } : child) } : item) } }));
       const removeChildItem = (subItemId, childId) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: item.childItems.filter(child => child.id !== childId) } : item) } }));
       const setChildItemColor = (subItemId, childId, colorKey) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: item.childItems.map(child => child.id === childId ? { ...child, amountColor: colorKey } : child) } : item) } }));
@@ -705,26 +811,80 @@
           )}
 
           {/* 💡 우클릭 팝업 메뉴 (Context Menu) */}
-          {contextMenu.isOpen && (
-            <div
-              className="context-menu-enter fixed z-[9999] bg-white rounded-xl shadow-2xl border border-[#DFD8CE] py-1.5 w-36 overflow-hidden"
-              style={{ top: contextMenu.y, left: contextMenu.x }}
-            >
-              <button 
-                onClick={handleContextMenuRename} 
-                className="w-full text-left px-4 py-2.5 text-[12px] font-bold text-[#3D2B1F] hover:bg-[#F9F6F0] hover:text-[#8B5A2B] flex items-center gap-2 transition-colors"
+          {contextMenu.isOpen && (() => {
+            const target = contextMenu.target;
+            const targetItem = target?.type === 'block' ? target.block : target?.type === 'sub' ? target.subItem : target?.childItem;
+            const isCredit = !!targetItem?.isPlanned;
+            return (
+              <div
+                className="context-menu-enter fixed z-[9999] bg-white rounded-xl shadow-2xl border border-[#DFD8CE] py-1.5 w-40 overflow-hidden"
+                style={{ top: contextMenu.y, left: contextMenu.x }}
               >
-                <i className="ph-bold ph-pencil-simple text-[#A69C8E]"></i> 이름 변경
-              </button>
-              <div className="h-px bg-[#EFEBE4] my-1"></div>
-              <button 
-                onClick={handleContextMenuSplit} 
-                className="w-full text-left px-4 py-2.5 text-[12px] font-bold text-[#C62828] hover:bg-[#FFEBEE] flex items-center gap-2 transition-colors"
-              >
-                <i className="ph-bold ph-scissors text-[#E57373]"></i> 금액 분리
-              </button>
-            </div>
-          )}
+                <button 
+                  onClick={handleContextMenuRename} 
+                  className="w-full text-left px-4 py-2.5 text-[12px] font-bold text-[#3D2B1F] hover:bg-[#F9F6F0] hover:text-[#8B5A2B] flex items-center gap-2 transition-colors"
+                >
+                  <i className="ph-bold ph-pencil-simple text-[#A69C8E]"></i> 이름 변경
+                </button>
+                <button 
+                  onClick={handleContextMenuSplit} 
+                  className="w-full text-left px-4 py-2.5 text-[12px] font-bold text-[#3D2B1F] hover:bg-[#F9F6F0] hover:text-[#8B5A2B] flex items-center gap-2 transition-colors"
+                >
+                  <i className="ph-bold ph-scissors text-[#A69C8E]"></i> 금액 분리
+                </button>
+                <button 
+                  onClick={handleContextMenuCredit} 
+                  className={`w-full text-left px-4 py-2.5 text-[12px] font-bold flex items-center gap-2 transition-colors ${isCredit ? 'text-[#8B5A2B] bg-[#FDF6E9] hover:bg-[#F9F6F0]' : 'text-[#3D2B1F] hover:bg-[#F9F6F0] hover:text-[#8B5A2B]'}`}
+                >
+                  <i className="ph-bold ph-clock text-[#A69C8E]"></i> {isCredit ? '외상 해제' : '외상 설정'}
+                </button>
+                <div className="h-px bg-[#EFEBE4] my-1"></div>
+                <button 
+                  onClick={handleContextMenuColor} 
+                  className="w-full text-left px-4 py-2.5 text-[12px] font-bold text-[#3D2B1F] hover:bg-[#F9F6F0] hover:text-[#8B5A2B] flex items-center gap-2 transition-colors"
+                >
+                  <i className="ph-fill ph-palette text-[#A69C8E]"></i> 색상 설정
+                </button>
+              </div>
+            );
+          })()}
+
+          {colorModal.isOpen && (() => {
+            const isBlockColor = colorModal.target?.type === 'block';
+            const options = isBlockColor ? Object.keys(COLOR_TAGS) : SUBITEM_COLOR_ORDER;
+            const title = isBlockColor ? '박스 배경 색상' : '금액 표시 색상';
+            return (
+              <div className="fixed inset-0 z-[9998] flex items-center justify-center p-4 bg-[#2A1D15]/50 backdrop-blur-sm" onClick={() => setColorModal({ isOpen: false, target: null, currentColor: 'none' })}>
+                <div className="bg-white rounded-2xl w-full max-w-xs shadow-2xl overflow-hidden border border-[#E6E0D4]" onClick={(e) => e.stopPropagation()}>
+                  <div className="p-5 border-b border-[#EFEBE4] bg-[#FDFCFB]">
+                    <h3 className="font-extrabold text-[#3D2B1F] text-base flex items-center gap-2">
+                      <i className="ph-fill ph-palette text-[#8B5A2B]" style={{fontSize: 18}}></i> 색상 설정
+                    </h3>
+                    <p className="text-[11px] font-bold text-[#A69C8E] mt-1">{title}</p>
+                  </div>
+                  <div className="p-5 grid grid-cols-2 gap-2">
+                    {options.map(colorKey => {
+                      const color = isBlockColor ? COLOR_TAGS[colorKey] : SUBITEM_AMOUNT_COLORS[colorKey];
+                      const isActive = colorModal.currentColor === colorKey;
+                      return (
+                        <button
+                          key={colorKey}
+                          type="button"
+                          onClick={() => applyContextColor(colorKey)}
+                          className={`px-3 py-2 rounded-lg border text-[12px] font-extrabold flex items-center gap-2 transition-all
+                            ${isActive ? 'border-[#8B5A2B] bg-[#F9F6F0] text-[#3D2B1F] ring-1 ring-[#8B5A2B]' : 'border-[#DFD8CE] bg-white text-[#6D5443] hover:bg-[#F9F6F0]'}
+                          `}
+                        >
+                          <span className={`w-4 h-4 rounded-full border border-black/10 ${isBlockColor ? `${color.bg} ${color.border}` : color.swatch}`}></span>
+                          {isBlockColor ? colorKey : color.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
           
           <header className="min-h-[72px] bg-[#FDFCFB] border-b border-[#E6E0D4] flex flex-wrap items-center justify-between gap-4 px-4 sm:px-8 py-3 shrink-0 sticky top-0 z-30 shadow-sm">
             <div className="flex items-center gap-3 min-w-0">
@@ -819,7 +979,7 @@
                         </div>
                       ) : (
                         accountBlocks.map((block, idx) => {
-                          const isSelected = selectedBlocks.includes(block.id);
+                          const isSelected = isItemSelected('block', block.id);
                           const tagColor = COLOR_TAGS[block.color] || COLOR_TAGS['none'];
                           const hasSubItems = block.subItems && block.subItems.length > 0;
                           const blockAmount = getBlockAmount(block);
@@ -842,10 +1002,10 @@
                                 onDragLeave={handleDragLeave}
                                 onDrop={(e) => handleDrop(e, 'block', block.id, 'inside', account.id)}
                                 onDragEnd={clearAllDragStates}
-                                onClick={(e) => handleBlockClick(e, block.id)}
+                                onClick={(e) => handleItemClick(e, 'block', block, null, null)}
                                 onContextMenu={(e) => handleContextMenu(e, 'block', block, null, null)}
                                 className={`
-                                  block-item relative flex flex-col border rounded-xl shadow-sm cursor-grab active:cursor-grabbing select-none transition-colors group/block
+                                  selectable-item block-item relative flex flex-col border rounded-xl shadow-sm cursor-grab active:cursor-grabbing select-none transition-colors group/block
                                   ${isSelected ? `${theme.border} ring-1 ${theme.ring} ${theme.light} bg-opacity-40` : `${tagColor.bg} ${tagColor.border}`}
                                   ${draggedItem?.id === block.id ? 'opacity-50' : 'hover:shadow-md'}
                                   ${dragOverZone === `block-${block.id}-inside` ? '!border-[#8B5A2B] ring-2 ring-[#8B5A2B] bg-[#FDFCFB]' : ''}
@@ -860,7 +1020,7 @@
                                       >
                                         {block.label}
                                       </p>
-                                      {isPlanned && <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
+                                      {isPlanned && <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">외상</span>}
                                     </div>
                                     <div className="flex items-center gap-2 pointer-events-auto mt-0.5">
                                       <p className={`font-mono text-[16px] font-black tracking-tight ${getAmountTextClass(blockAmount, 'auto', isPlanned)}`}>
@@ -886,6 +1046,7 @@
                                       type="button"
                                       className={`no-select-trigger p-1.5 rounded-md hover:bg-black/5 transition-colors cursor-pointer ${isPlanned ? 'text-[#8B5A2B] bg-[#FDF6E9]' : 'text-[#A69C8E] hover:text-[#8B5A2B]'}`}
                                       onClick={(e) => { e.stopPropagation(); toggleBlockPlanned(block.id); }}
+                                      title={isPlanned ? '외상 해제' : '외상 설정'}
                                     >
                                       <i className="ph-bold ph-clock" style={{fontSize: 16}}></i>
                                     </button>
@@ -904,6 +1065,7 @@
                                       {block.subItems.map((sub, sIdx) => {
                                         const childItems = getChildItems(sub);
                                         const subAmount = getSubItemAmount(sub);
+                                        const isSubSelected = isItemSelected('sub', sub.id);
                                         return (
                                           <Fragment key={sub.id}>
                                             <div
@@ -919,9 +1081,10 @@
                                               onDragLeave={handleDragLeave}
                                               onDrop={(e) => handleDrop(e, 'sub', sub.id, 'inside', account.id)}
                                               onDragEnd={clearAllDragStates}
+                                              onClick={(e) => handleItemClick(e, 'sub', block, sub, null)}
                                               onContextMenu={(e) => handleContextMenu(e, 'sub', block, sub, null)}
-                                              className={`cursor-grab active:cursor-grabbing select-none rounded-lg border bg-white/70 px-2 py-1.5 text-[#6D5443] font-medium transition-colors
-                                                ${draggedItem?.id === sub.id ? 'opacity-50 border-[#8B5A2B]' : 'border-[#E6E0D4]'} 
+                                              className={`selectable-item cursor-grab active:cursor-grabbing select-none rounded-lg border bg-white/70 px-2 py-1.5 text-[#6D5443] font-medium transition-colors
+                                                ${isSubSelected ? 'border-[#8B5A2B] ring-1 ring-[#8B5A2B] bg-[#FDF6E9]' : (draggedItem?.id === sub.id ? 'opacity-50 border-[#8B5A2B]' : 'border-[#E6E0D4]')} 
                                                 ${dragOverZone === `sub-${sub.id}-inside` ? '!border-[#8B5A2B] ring-2 ring-[#8B5A2B] bg-[#FDFCFB]' : ''}
                                               `}
                                             >
@@ -939,13 +1102,15 @@
                                                   <span className={`text-[12px] font-mono font-bold ${getAmountTextClass(subAmount, sub.amountColor || 'auto', sub.isPlanned)}`}>
                                                     {subAmount > 0 ? '+' : ''}{formatCurrency(subAmount)}
                                                   </span>
-                                                  {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
+                                                  {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">외상</span>}
                                                 </div>
                                               </div>
                                               
                                               {(childItems.length > 0) && (
                                                 <div className={`mt-1.5 ml-3 pl-2 border-l-2 border-[#EFEBE4] flex flex-col gap-0 transition-colors`}>
-                                                  {childItems.map((child, cIdx) => (
+                                                  {childItems.map((child, cIdx) => {
+                                                    const isChildSelected = isItemSelected('child', child.id);
+                                                    return (
                                                     <Fragment key={child.id}>
                                                       <div
                                                         onDragOver={(e) => handleDragOver(e, `child-${child.id}-before`)}
@@ -957,9 +1122,10 @@
                                                         draggable
                                                         onDragStart={(e) => handleDragStart(e, 'child', child.id)}
                                                         onDragEnd={clearAllDragStates}
+                                                        onClick={(e) => handleItemClick(e, 'child', block, sub, child)}
                                                         onContextMenu={(e) => handleContextMenu(e, 'child', block, sub, child)}
-                                                        className={`cursor-grab active:cursor-grabbing select-none flex justify-between items-center gap-2 rounded px-1.5 py-0.5 transition-colors
-                                                          ${draggedItem?.id === child.id ? 'opacity-50' : 'hover:bg-black/5'}
+                                                        className={`selectable-item cursor-grab active:cursor-grabbing select-none flex justify-between items-center gap-2 rounded px-1.5 py-0.5 transition-colors
+                                                          ${isChildSelected ? 'bg-[#FDF6E9] ring-1 ring-[#8B5A2B]' : (draggedItem?.id === child.id ? 'opacity-50' : 'hover:bg-black/5')}
                                                         `}
                                                       >
                                                         <span className="truncate flex items-center gap-1.5 pointer-events-none">
@@ -971,12 +1137,16 @@
                                                             {child.label || '소분류 없음'}
                                                           </span>
                                                         </span>
-                                                        <span className={`text-[11px] font-mono font-bold pointer-events-none opacity-60 ${getAmountTextClass(child.amount, child.amountColor || 'auto')}`}>
-                                                          {child.amount > 0 ? '+' : ''}{formatCurrency(child.amount)}
-                                                        </span>
+                                                        <div className="flex items-center gap-1.5 shrink-0 pointer-events-none">
+                                                          <span className={`text-[11px] font-mono font-bold opacity-60 ${getAmountTextClass(child.amount, child.amountColor || 'auto', child.isPlanned)}`}>
+                                                            {child.amount > 0 ? '+' : ''}{formatCurrency(child.amount)}
+                                                          </span>
+                                                          {child.isPlanned && <span className="text-[9px] font-black px-1 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">외상</span>}
+                                                        </div>
                                                       </div>
                                                     </Fragment>
-                                                  ))}
+                                                  );
+                                                  })}
                                                   <div
                                                     onDragOver={(e) => handleDragOver(e, `sub-${sub.id}-child-bottom`)}
                                                     onDragLeave={handleDragLeave}
@@ -1037,12 +1207,40 @@
             </div>
           </div>
 
+          <footer className="shrink-0 bg-[#2A1D15] text-[#FDFCFB] border-t border-[#4A3B32] px-4 sm:px-8 py-3 shadow-[0_-8px_20px_rgba(42,29,21,0.12)]">
+            <div className="max-w-none flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-[150px]">
+                <i className="ph-fill ph-calculator text-[#D2B48C]" style={{fontSize: 20}}></i>
+                <span className="text-sm font-black">전체 합계</span>
+                <span className={`text-sm font-mono font-black ${boardTotals.balance >= 0 ? 'text-[#81C784]' : 'text-[#E57373]'}`}>
+                  {boardTotals.balance > 0 ? '+' : ''}{formatCurrency(boardTotals.balance)}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                <div className="px-3 py-2 rounded-lg bg-[#203825] border border-[#31573A] min-w-[145px]">
+                  <p className="text-[10px] font-extrabold text-[#A5D6A7] uppercase tracking-widest">총 입금</p>
+                  <p className="text-lg font-black font-mono text-[#81C784]">+{formatCurrency(boardTotals.income)}</p>
+                </div>
+                <div className="px-3 py-2 rounded-lg bg-[#3A2020] border border-[#6D3333] min-w-[145px]">
+                  <p className="text-[10px] font-extrabold text-[#EF9A9A] uppercase tracking-widest">총 출금</p>
+                  <p className="text-lg font-black font-mono text-[#E57373]">{boardTotals.expense < 0 ? '-' : ''}{formatCurrency(Math.abs(boardTotals.expense))}</p>
+                </div>
+                <div className="px-3 py-2 rounded-lg bg-[#3A3022] border border-[#6B5534] min-w-[145px]">
+                  <p className="text-[10px] font-extrabold text-[#D2B48C] uppercase tracking-widest">외상 별도계산</p>
+                  <p className={`text-lg font-black font-mono ${boardTotals.credit >= 0 ? 'text-[#F2C94C]' : 'text-[#E57373]'}`}>
+                    {boardTotals.credit > 0 ? '+' : ''}{formatCurrency(boardTotals.credit)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </footer>
+
           {/* 3. 다중 선택 계산기 바 */}
-          {selectedBlocks.length > 0 && (
-            <div className="selection-bar fixed bottom-8 left-1/2 -translate-x-1/2 bg-[#2A1D15] text-[#FDFCFB] px-8 py-4 rounded-full shadow-2xl flex items-center gap-8 z-40 animate-in slide-in-from-bottom-4 border border-[#4A3B32]">
+          {selectedItems.length > 0 && (
+            <div className="selection-bar fixed bottom-24 left-1/2 -translate-x-1/2 bg-[#2A1D15] text-[#FDFCFB] px-8 py-4 rounded-full shadow-2xl flex items-center gap-8 z-40 animate-in slide-in-from-bottom-4 border border-[#4A3B32]">
               <div className="flex items-center gap-3">
                 <i className="ph-fill ph-calculator text-[#D2B48C]" style={{fontSize: 20}}></i>
-                <span className="text-sm font-bold"><span className="text-[#D2B48C] text-lg mr-1">{selectedBlocks.length}</span>개 선택됨</span>
+                <span className="text-sm font-bold"><span className="text-[#D2B48C] text-lg mr-1">{selectedItems.length}</span>개 선택됨</span>
               </div>
               <div className="w-px h-6 bg-[#4A3B32]" />
               <div className="flex items-center gap-4">
@@ -1246,7 +1444,7 @@
                                         className="flex-1 w-0 bg-transparent font-extrabold text-[14px] text-[#2A1D15] border-b border-transparent focus:border-[#DFD8CE] hover:border-black/10 px-1 py-1 focus:outline-none transition-colors"
                                         placeholder="항목/적요명"
                                       />
-                                      {isPlanned && <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
+                                      {isPlanned && <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">외상</span>}
                                       <input 
                                         type="text" value={hasSubItems ? formatCurrency(blockAmount) : (block.amountString != null ? block.amountString : (block.amount === 0 ? '' : block.amount))}
                                         readOnly={hasSubItems}
@@ -1277,7 +1475,7 @@
                                                   <span className={`text-[12px] font-mono font-bold ${getAmountTextClass(subAmount, sub.amountColor || 'auto', sub.isPlanned)}`}>
                                                     {subAmount > 0 ? '+' : ''}{formatCurrency(subAmount)}
                                                   </span>
-                                                  {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">예정</span>}
+                                                  {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">외상</span>}
                                                 </div>
                                               </div>
                                               {childItems.length > 0 && (
@@ -1288,9 +1486,12 @@
                                                         <i className="ph-bold ph-arrow-elbow-down-right text-[#D2B48C]" style={{fontSize: 12}}></i>
                                                         <span className="text-[11px] font-bold text-[#6D5443]">{child.label || '소분류 없음'}</span>
                                                       </span>
-                                                      <span className={`text-[11px] font-mono font-bold ${getAmountTextClass(child.amount, child.amountColor || 'auto')}`}>
-                                                        {child.amount > 0 ? '+' : ''}{formatCurrency(child.amount)}
-                                                      </span>
+                                                      <div className="flex items-center gap-1.5 shrink-0">
+                                                        <span className={`text-[11px] font-mono font-bold ${getAmountTextClass(child.amount, child.amountColor || 'auto', child.isPlanned)}`}>
+                                                          {child.amount > 0 ? '+' : ''}{formatCurrency(child.amount)}
+                                                        </span>
+                                                        {child.isPlanned && <span className="text-[9px] font-black px-1 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">외상</span>}
+                                                      </div>
                                                     </div>
                                                   ))}
                                                 </div>
@@ -1377,7 +1578,7 @@
                     >
                       <span className="flex items-center gap-2">
                         <i className="ph-bold ph-clock" style={{fontSize: 16}}></i>
-                        예정금액 · 현재 잔고 제외
+                        외상금액 · 잔고 합계 별도계산
                       </span>
                       <span className={`text-[10px] px-2 py-1 rounded-full ${modal.blockData.isPlanned ? 'bg-[#8B5A2B] text-white' : 'bg-[#EFEBE4] text-[#A69C8E]'}`}>
                         {modal.blockData.isPlanned ? '켜짐' : '꺼짐'}
@@ -1467,7 +1668,7 @@
                                       <div className="flex gap-2 items-start">
                                         <div className="flex-1 space-y-1.5">
                                           <input type="text" value={child.label} onChange={(e) => handleChildItemChange(sub.id, child.id, 'label', e.target.value)} placeholder="세부 내용" className="w-full text-[11px] font-bold border border-[#DFD8CE] rounded p-2 focus:outline-none focus:border-[#8B5A2B]" />
-                                          <input type="text" value={child.amountString != null ? child.amountString : (child.amount === 0 ? '' : child.amount)} onChange={(e) => handleChildItemChange(sub.id, child.id, 'amount', e.target.value)} placeholder="금액" className={`w-full text-xs font-mono font-bold border border-[#DFD8CE] rounded p-2 text-right focus:outline-none focus:border-[#8B5A2B] ${getAmountTextClass(child.amount, child.amountColor || 'auto')}`} />
+                                          <input type="text" value={child.amountString != null ? child.amountString : (child.amount === 0 ? '' : child.amount)} onChange={(e) => handleChildItemChange(sub.id, child.id, 'amount', e.target.value)} placeholder="금액" className={`w-full text-xs font-mono font-bold border border-[#DFD8CE] rounded p-2 text-right focus:outline-none focus:border-[#8B5A2B] ${getAmountTextClass(child.amount, child.amountColor || 'auto', child.isPlanned)}`} />
                                         </div>
                                         <div className="flex flex-col gap-1">
                                           <button type="button" onClick={() => removeChildItem(sub.id, child.id)} className="p-1.5 text-[#C62828] bg-white border border-[#DFD8CE] rounded hover:bg-[#FFEBEE]" title="삭제">
