@@ -313,14 +313,16 @@
         return null;
       };
 
-      const getTotalsForBlocks = (targetBlocks) => targetBlocks.reduce((totals, block) => {
-        const amount = getEffectiveAmount(block);
-        if (amount > 0) totals.income += amount;
-        if (amount < 0) totals.expense += amount;
-        totals.credit += getCreditAmount(block);
-        totals.balance += amount;
-        return totals;
-      }, { income: 0, expense: 0, credit: 0, balance: 0 });
+      const getTotalsForBlocks = (targetBlocks) => {
+        const totals = targetBlocks.reduce((acc, block) => {
+          const amount = getBlockAmount(block);
+          if (amount > 0) acc.income += amount;
+          if (amount < 0) acc.expense += Math.abs(amount);
+          acc.credit += getCreditAmount(block);
+          return acc;
+        }, { income: 0, expense: 0, credit: 0 });
+        return { ...totals, balance: totals.income - totals.expense };
+      };
 
       const selectedItems = useMemo(() => selectedBlocks.map(resolveSelectionItem).filter(Boolean), [blocks, selectedBlocks]);
       const selectedSum = useMemo(() => selectedItems.reduce((sum, item) => sum + item.amount, 0), [selectedItems]);
@@ -1191,7 +1193,7 @@
                         </div>
                         <div className="rounded-lg border border-[#FFCDD2] bg-[#FFEBEE] px-3 py-2">
                           <p className="text-[10px] font-black text-[#C62828] uppercase tracking-widest">총 출금</p>
-                          <p className="mt-1 text-[15px] font-black font-mono text-[#C62828] truncate">{accountTotals.expense < 0 ? '-' : ''}{formatCurrency(Math.abs(accountTotals.expense))}</p>
+                          <p className="mt-1 text-[15px] font-black font-mono text-[#C62828] truncate">{accountTotals.expense > 0 ? '-' : ''}{formatCurrency(accountTotals.expense)}</p>
                         </div>
                         <div className="rounded-lg border border-[#D2B48C] bg-[#FDF6E9] px-3 py-2">
                           <p className="text-[10px] font-black text-[#8B5A2B] uppercase tracking-widest">외상 별도</p>
@@ -1567,7 +1569,7 @@
                     >
                       <span className="flex items-center gap-2">
                         <i className="ph-bold ph-clock" style={{fontSize: 16}}></i>
-                        외상금액 · 잔고 합계 별도계산
+                        외상체크 · 외상 별도 합계 표시
                       </span>
                       <span className={`text-[10px] px-2 py-1 rounded-full ${modal.blockData.isPlanned ? 'bg-[#8B5A2B] text-white' : 'bg-[#EFEBE4] text-[#A69C8E]'}`}>
                         {modal.blockData.isPlanned ? '켜짐' : '꺼짐'}
