@@ -315,16 +315,24 @@
 
       const collectAmountEntries = (item) => {
         const entries = [];
-        const visit = (current) => {
+        const visit = (current, inheritedPlanned = false) => {
           if (!current) return;
+          const isPlanned = inheritedPlanned || !!current.isPlanned;
           const amount = getAmountValue(current);
-          if (amount !== 0) entries.push({ amount, isPlanned: !!current.isPlanned });
-          (current.subItems || []).forEach(visit);
-          getChildItems(current).forEach(visit);
+          if (amount !== 0) entries.push({ amount, isPlanned });
+          (current.subItems || []).forEach(child => visit(child, isPlanned));
+          getChildItems(current).forEach(child => visit(child, isPlanned));
         };
         visit(item);
         return entries;
       };
+
+      const setItemPlannedDeep = (item, isPlanned) => ({
+        ...item,
+        isPlanned,
+        ...(item.subItems ? { subItems: item.subItems.map(child => setItemPlannedDeep(child, isPlanned)) } : {}),
+        ...(item.childItems ? { childItems: item.childItems.map(child => setItemPlannedDeep(child, isPlanned)) } : {}),
+      });
 
       const getTotalsForBlocks = (targetBlocks) => {
         const totals = targetBlocks.reduce((acc, block) => {
@@ -700,7 +708,7 @@
       const openCreateModal = (accountId) => setModal({ isOpen: true, mode: 'create', amountInput: '', blockData: { id: createId('b_new'), accountId, label: '새 내역', amount: 0, color: 'none', isPlanned: false, subItems: [] } });
       const openEditModal = (block) => setModal({ isOpen: true, mode: 'edit', amountInput: block.amount === 0 && block.subItems?.length > 0 ? '' : formatCurrency(block.amount), blockData: { ...block, subItems: block.subItems ? [...block.subItems] : [] } });
       const closeModals = () => { setModal({ isOpen: false, mode: 'create', blockData: null, amountInput: '' }); setReportModal({ isOpen: false, accountId: null }); };
-      const toggleBlockPlanned = (blockId) => updateTargetItem('block', blockId, null, null, (item) => ({ ...item, isPlanned: !item.isPlanned }));
+      const toggleBlockPlanned = (blockId) => updateTargetItem('block', blockId, null, null, (item) => setItemPlannedDeep(item, !item.isPlanned));
       const toggleSubItems = (blockId) => setCollapsedSubItems(prev => prev.includes(blockId) ? prev.filter(id => id !== blockId) : [...prev, blockId]);
       
       const saveBlock = (e) => { e.preventDefault(); if (modal.mode === 'create') setBlocks(prev => cleanupBlocks([...prev, modal.blockData])); else setBlocks(prev => cleanupBlocks(prev.map(b => b.id === modal.blockData.id ? modal.blockData : b))); closeModals(); };
@@ -1063,7 +1071,7 @@
                                       type="button"
                                       className={`no-select-trigger p-1.5 rounded-md hover:bg-black/5 transition-colors cursor-pointer ${isPlanned ? 'text-[#8B5A2B] bg-[#FDF6E9]' : 'text-[#A69C8E] hover:text-[#8B5A2B]'}`}
                                       onClick={(e) => { e.stopPropagation(); toggleBlockPlanned(block.id); }}
-                                      title={isPlanned ? '외상 해제' : '외상 설정'}
+                                      title={isPlanned ? '대분류 전체 외상 해제' : '대분류 전체 외상 설정'}
                                     >
                                       <i className="ph-bold ph-clock" style={{fontSize: 16}}></i>
                                     </button>
