@@ -313,16 +313,17 @@
         return null;
       };
 
-      const selectedItems = useMemo(() => selectedBlocks.map(resolveSelectionItem).filter(Boolean), [blocks, selectedBlocks]);
-      const selectedSum = useMemo(() => selectedItems.reduce((sum, item) => sum + item.amount, 0), [selectedItems]);
-      const boardTotals = useMemo(() => blocks.reduce((totals, block) => {
+      const getTotalsForBlocks = (targetBlocks) => targetBlocks.reduce((totals, block) => {
         const amount = getEffectiveAmount(block);
         if (amount > 0) totals.income += amount;
         if (amount < 0) totals.expense += amount;
         totals.credit += getCreditAmount(block);
         totals.balance += amount;
         return totals;
-      }, { income: 0, expense: 0, credit: 0, balance: 0 }), [blocks]);
+      }, { income: 0, expense: 0, credit: 0, balance: 0 });
+
+      const selectedItems = useMemo(() => selectedBlocks.map(resolveSelectionItem).filter(Boolean), [blocks, selectedBlocks]);
+      const selectedSum = useMemo(() => selectedItems.reduce((sum, item) => sum + item.amount, 0), [selectedItems]);
 
       useEffect(() => {
         if (!GAS_URL || GAS_URL.includes("여기에")) { setIsInitialLoading(false); return; }
@@ -918,7 +919,7 @@
               
               {accountsData.map(account => {
                 const accountBlocks = blocks.filter(b => b.accountId === account.id);
-                const accountTotal = accountBlocks.reduce((sum, b) => sum + getEffectiveAmount(b), 0);
+                const accountTotals = getTotalsForBlocks(accountBlocks);
                 const theme = COLUMN_THEMES[account.theme || 'wood'];
                 const cardHolders = getCardHolders(account);
 
@@ -1182,12 +1183,28 @@
                       />
                     </div>
 
-                    <div className="p-5 bg-white border-t border-[#E6E0D4] rounded-b-xl shrink-0">
-                      <div className="flex justify-between items-end">
-                        <span className="text-xs font-black text-[#6D5443] uppercase tracking-widest">현재 잔고</span>
-                        <span className={`text-[26px] font-black tracking-tighter font-mono ${accountTotal >= 0 ? theme.text : 'text-[#C62828]'}`}>
-                          {formatCurrency(accountTotal)}
-                        </span>
+                    <div className="p-4 bg-white border-t border-[#E6E0D4] rounded-b-xl shrink-0">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-lg border border-[#C8E6C9] bg-[#F1F8E9] px-3 py-2">
+                          <p className="text-[10px] font-black text-[#2E7D32] uppercase tracking-widest">총 입금</p>
+                          <p className="mt-1 text-[15px] font-black font-mono text-[#2E7D32] truncate">+{formatCurrency(accountTotals.income)}</p>
+                        </div>
+                        <div className="rounded-lg border border-[#FFCDD2] bg-[#FFEBEE] px-3 py-2">
+                          <p className="text-[10px] font-black text-[#C62828] uppercase tracking-widest">총 출금</p>
+                          <p className="mt-1 text-[15px] font-black font-mono text-[#C62828] truncate">{accountTotals.expense < 0 ? '-' : ''}{formatCurrency(Math.abs(accountTotals.expense))}</p>
+                        </div>
+                        <div className="rounded-lg border border-[#D2B48C] bg-[#FDF6E9] px-3 py-2">
+                          <p className="text-[10px] font-black text-[#8B5A2B] uppercase tracking-widest">외상 별도</p>
+                          <p className={`mt-1 text-[15px] font-black font-mono truncate ${accountTotals.credit >= 0 ? 'text-[#8B5A2B]' : 'text-[#C62828]'}`}>
+                            {accountTotals.credit > 0 ? '+' : ''}{formatCurrency(accountTotals.credit)}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-[#E6E0D4] bg-[#FCFAF8] px-3 py-2">
+                          <p className="text-[10px] font-black text-[#6D5443] uppercase tracking-widest">잔고</p>
+                          <p className={`mt-1 text-[18px] font-black font-mono tracking-tight truncate ${accountTotals.balance >= 0 ? theme.text : 'text-[#C62828]'}`}>
+                            {accountTotals.balance > 0 ? '+' : ''}{formatCurrency(accountTotals.balance)}
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1207,37 +1224,9 @@
             </div>
           </div>
 
-          <footer className="shrink-0 bg-[#2A1D15] text-[#FDFCFB] border-t border-[#4A3B32] px-4 sm:px-8 py-3 shadow-[0_-8px_20px_rgba(42,29,21,0.12)]">
-            <div className="max-w-none flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 min-w-[150px]">
-                <i className="ph-fill ph-calculator text-[#D2B48C]" style={{fontSize: 20}}></i>
-                <span className="text-sm font-black">전체 합계</span>
-                <span className={`text-sm font-mono font-black ${boardTotals.balance >= 0 ? 'text-[#81C784]' : 'text-[#E57373]'}`}>
-                  {boardTotals.balance > 0 ? '+' : ''}{formatCurrency(boardTotals.balance)}
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                <div className="px-3 py-2 rounded-lg bg-[#203825] border border-[#31573A] min-w-[145px]">
-                  <p className="text-[10px] font-extrabold text-[#A5D6A7] uppercase tracking-widest">총 입금</p>
-                  <p className="text-lg font-black font-mono text-[#81C784]">+{formatCurrency(boardTotals.income)}</p>
-                </div>
-                <div className="px-3 py-2 rounded-lg bg-[#3A2020] border border-[#6D3333] min-w-[145px]">
-                  <p className="text-[10px] font-extrabold text-[#EF9A9A] uppercase tracking-widest">총 출금</p>
-                  <p className="text-lg font-black font-mono text-[#E57373]">{boardTotals.expense < 0 ? '-' : ''}{formatCurrency(Math.abs(boardTotals.expense))}</p>
-                </div>
-                <div className="px-3 py-2 rounded-lg bg-[#3A3022] border border-[#6B5534] min-w-[145px]">
-                  <p className="text-[10px] font-extrabold text-[#D2B48C] uppercase tracking-widest">외상 별도계산</p>
-                  <p className={`text-lg font-black font-mono ${boardTotals.credit >= 0 ? 'text-[#F2C94C]' : 'text-[#E57373]'}`}>
-                    {boardTotals.credit > 0 ? '+' : ''}{formatCurrency(boardTotals.credit)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </footer>
-
           {/* 3. 다중 선택 계산기 바 */}
           {selectedItems.length > 0 && (
-            <div className="selection-bar fixed bottom-24 left-1/2 -translate-x-1/2 bg-[#2A1D15] text-[#FDFCFB] px-8 py-4 rounded-full shadow-2xl flex items-center gap-8 z-40 animate-in slide-in-from-bottom-4 border border-[#4A3B32]">
+            <div className="selection-bar fixed bottom-8 left-1/2 -translate-x-1/2 bg-[#2A1D15] text-[#FDFCFB] px-8 py-4 rounded-full shadow-2xl flex items-center gap-8 z-40 animate-in slide-in-from-bottom-4 border border-[#4A3B32]">
               <div className="flex items-center gap-3">
                 <i className="ph-fill ph-calculator text-[#D2B48C]" style={{fontSize: 20}}></i>
                 <span className="text-sm font-bold"><span className="text-[#D2B48C] text-lg mr-1">{selectedItems.length}</span>개 선택됨</span>
