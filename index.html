@@ -335,21 +335,45 @@
       });
 
       const getTotalsForBlocks = (targetBlocks) => {
-        const totals = targetBlocks.reduce((acc, block) => {
-          collectAmountEntries(block).forEach(({ amount, isPlanned }) => {
-            if (amount > 0) acc.income += amount;
-            if (amount < 0) acc.expense += Math.abs(amount);
-            if (amount < 0 && isPlanned) acc.creditExpense += Math.abs(amount);
-            if (isPlanned) acc.credit += amount;
+        const addMediumAmount = (acc, amount) => {
+          if (amount > 0) acc.income += amount;
+          if (amount < 0) acc.expense += Math.abs(amount);
+        };
+        const addCheckedChildrenToCredit = (acc, sub) => {
+          getChildItems(sub).forEach(child => {
+            if (child.isPlanned) acc.credit += getAmountValue(child);
           });
+        };
+
+        const totals = targetBlocks.reduce((acc, block) => {
+          const subItems = block.subItems || [];
+          if (subItems.length === 0) {
+            const amount = getAmountValue(block);
+            if (block.isPlanned) acc.credit += amount;
+            else addMediumAmount(acc, amount);
+            return acc;
+          }
+
+          subItems.forEach(sub => {
+            const subAmount = getSubItemAmount(sub);
+            if (block.isPlanned || sub.isPlanned) {
+              acc.credit += subAmount;
+              return;
+            }
+
+            addMediumAmount(acc, subAmount);
+            addCheckedChildrenToCredit(acc, sub);
+          });
+
           return acc;
-        }, { income: 0, expense: 0, creditExpense: 0, credit: 0 });
-        const actualExpense = Math.max(0, totals.expense - totals.income - totals.creditExpense);
+        }, { income: 0, expense: 0, credit: 0 });
+
         const balance = targetBlocks.reduce((sum, block) => {
+          if (block.isPlanned) return sum;
           const blockAmount = getBlockAmount(block);
           return blockAmount > 0 ? sum + blockAmount : sum;
         }, 0);
-        return { ...totals, expense: actualExpense, balance };
+        return { ...totals, balance };
       };
 
       const selectedItems = useMemo(() => selectedBlocks.map(resolveSelectionItem).filter(Boolean), [blocks, selectedBlocks]);
@@ -1224,7 +1248,7 @@
                           <p className="mt-1 text-[15px] font-black font-mono text-[#C62828] truncate">{accountTotals.expense > 0 ? '-' : ''}{formatCurrency(accountTotals.expense)}</p>
                         </div>
                         <div className="rounded-lg border border-[#D2B48C] bg-[#FDF6E9] px-3 py-2">
-                          <p className="text-[10px] font-black text-[#8B5A2B] uppercase tracking-widest">외상 별도</p>
+                          <p className="text-[10px] font-black text-[#8B5A2B] uppercase tracking-widest">외상</p>
                           <p className={`mt-1 text-[15px] font-black font-mono truncate ${accountTotals.credit >= 0 ? 'text-[#8B5A2B]' : 'text-[#C62828]'}`}>
                             {accountTotals.credit > 0 ? '+' : ''}{formatCurrency(accountTotals.credit)}
                           </p>
@@ -1597,7 +1621,7 @@
                     >
                       <span className="flex items-center gap-2">
                         <i className="ph-bold ph-clock" style={{fontSize: 16}}></i>
-                        외상체크 · 외상 별도 합계 표시
+                        외상체크 · 외상 합계 표시
                       </span>
                       <span className={`text-[10px] px-2 py-1 rounded-full ${modal.blockData.isPlanned ? 'bg-[#8B5A2B] text-white' : 'bg-[#EFEBE4] text-[#A69C8E]'}`}>
                         {modal.blockData.isPlanned ? '켜짐' : '꺼짐'}
