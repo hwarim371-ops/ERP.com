@@ -78,6 +78,42 @@
 
     const DEFAULT_CARD_HOLDERS = { main: '대표', jecheon1: '이사님', miryang: '대표', jecheon2: '이사님' };
 
+    const SUMMARY_METRICS = {
+      income: {
+        label: '총 입금',
+        icon: 'ph-arrow-circle-down',
+        cardClass: 'border-[#C8E6C9] bg-[#F1F8E9] hover:bg-[#E8F5E9]',
+        textClass: 'text-[#2E7D32]',
+        selectedClass: 'ring-[#2E7D32] border-[#2E7D32] bg-white',
+        getValue: (totals) => totals.income,
+      },
+      expense: {
+        label: '총 출금',
+        icon: 'ph-arrow-circle-up',
+        cardClass: 'border-[#FFCDD2] bg-[#FFEBEE] hover:bg-[#FCE4E4]',
+        textClass: 'text-[#C62828]',
+        selectedClass: 'ring-[#C62828] border-[#C62828] bg-white',
+        getValue: (totals) => -totals.expense,
+      },
+      credit: {
+        label: '외상',
+        icon: 'ph-clock',
+        cardClass: 'border-[#D2B48C] bg-[#FDF6E9] hover:bg-[#FAEBD7]',
+        textClass: 'text-[#8B5A2B]',
+        selectedClass: 'ring-[#8B5A2B] border-[#8B5A2B] bg-white',
+        getValue: (totals) => totals.credit,
+      },
+      balance: {
+        label: '잔고',
+        icon: 'ph-wallet',
+        cardClass: 'border-[#E6E0D4] bg-[#FCFAF8] hover:bg-[#F7F1EA]',
+        textClass: 'text-[#6D5443]',
+        selectedClass: 'ring-[#6D5443] border-[#6D5443] bg-white',
+        getValue: (totals) => totals.balance,
+      },
+    };
+    const SUMMARY_METRIC_ORDER = ['income', 'expense', 'credit', 'balance'];
+
     function HwarimLogo() {
       return (
         <div className="w-[96px] h-[46px] rounded-lg border border-[#D2B48C] overflow-hidden shadow-inner bg-[#D8B27A] shrink-0">
@@ -144,6 +180,7 @@
       const [dragOverZone, setDragOverZone] = useState(null); 
       
       const [selectedBlocks, setSelectedBlocks] = useState([]);
+      const [selectedSummaryCards, setSelectedSummaryCards] = useState([]);
       const [collapsedSubItems, setCollapsedSubItems] = useState([]);
       
       const [modal, setModal] = useState({ isOpen: false, mode: 'create', blockData: null, amountInput: '' });
@@ -285,6 +322,7 @@
       };
 
       const getSelectionKey = (type, id) => `${type}:${id}`;
+      const getSummarySelectionKey = (accountId, metricKey) => `${accountId}:${metricKey}`;
       const splitSelectionKey = (selectionKey) => {
         if (!selectionKey) return { type: '', id: '' };
         if (!selectionKey.includes(':')) return { type: 'block', id: selectionKey };
@@ -293,6 +331,11 @@
       };
       const getTargetId = (type, block, subItem, childItem) => type === 'block' ? block?.id : type === 'sub' ? subItem?.id : childItem?.id;
       const isItemSelected = (type, id) => selectedBlocks.includes(getSelectionKey(type, id)) || (type === 'block' && selectedBlocks.includes(id));
+      const isSummarySelected = (accountId, metricKey) => selectedSummaryCards.includes(getSummarySelectionKey(accountId, metricKey));
+      const toggleSummarySelection = (accountId, metricKey) => {
+        const selectionKey = getSummarySelectionKey(accountId, metricKey);
+        setSelectedSummaryCards(prev => prev.includes(selectionKey) ? prev.filter(key => key !== selectionKey) : [...prev, selectionKey]);
+      };
       const resolveSelectionItem = (selectionKey) => {
         const { type, id } = splitSelectionKey(selectionKey);
         for (const block of blocks) {
@@ -376,8 +419,31 @@
         return { ...totals, balance };
       };
 
+      const formatSignedCurrency = (amount) => `${amount > 0 ? '+' : ''}${formatCurrency(amount)}`;
       const selectedItems = useMemo(() => selectedBlocks.map(resolveSelectionItem).filter(Boolean), [blocks, selectedBlocks]);
-      const selectedSum = useMemo(() => selectedItems.reduce((sum, item) => sum + item.amount, 0), [selectedItems]);
+      const selectedSummaryItems = useMemo(() => selectedSummaryCards.map(selectionKey => {
+        const [accountId, metricKey] = selectionKey.split(':');
+        const account = accountsData.find(acc => acc.id === accountId);
+        const metric = SUMMARY_METRICS[metricKey];
+        if (!account || !metric) return null;
+        const accountTotals = getTotalsForBlocks(blocks.filter(block => block.accountId === accountId));
+        const amount = metric.getValue(accountTotals);
+        return {
+          key: selectionKey,
+          type: 'summary',
+          label: `${account.name} ${metric.label}`,
+          accountName: account.name,
+          metricLabel: metric.label,
+          amount,
+          icon: metric.icon,
+        };
+      }).filter(Boolean), [accountsData, blocks, selectedSummaryCards]);
+      const calculationItems = useMemo(() => [...selectedItems, ...selectedSummaryItems], [selectedItems, selectedSummaryItems]);
+      const selectedSum = useMemo(() => calculationItems.reduce((sum, item) => sum + item.amount, 0), [calculationItems]);
+      const clearCalculationSelection = () => {
+        setSelectedBlocks([]);
+        setSelectedSummaryCards([]);
+      };
 
       useEffect(() => {
         if (!GAS_URL || GAS_URL.includes("여기에")) { setIsInitialLoading(false); return; }
@@ -1239,26 +1305,30 @@
 
                     <div className="p-4 bg-white border-t border-[#E6E0D4] rounded-b-xl shrink-0">
                       <div className="grid grid-cols-2 gap-2">
-                        <div className="rounded-lg border border-[#C8E6C9] bg-[#F1F8E9] px-3 py-2">
-                          <p className="text-[10px] font-black text-[#2E7D32] uppercase tracking-widest">총 입금</p>
-                          <p className="mt-1 text-[15px] font-black font-mono text-[#2E7D32] truncate">+{formatCurrency(accountTotals.income)}</p>
-                        </div>
-                        <div className="rounded-lg border border-[#FFCDD2] bg-[#FFEBEE] px-3 py-2">
-                          <p className="text-[10px] font-black text-[#C62828] uppercase tracking-widest">총 출금</p>
-                          <p className="mt-1 text-[15px] font-black font-mono text-[#C62828] truncate">{accountTotals.expense > 0 ? '-' : ''}{formatCurrency(accountTotals.expense)}</p>
-                        </div>
-                        <div className="rounded-lg border border-[#D2B48C] bg-[#FDF6E9] px-3 py-2">
-                          <p className="text-[10px] font-black text-[#8B5A2B] uppercase tracking-widest">외상</p>
-                          <p className={`mt-1 text-[15px] font-black font-mono truncate ${accountTotals.credit >= 0 ? 'text-[#8B5A2B]' : 'text-[#C62828]'}`}>
-                            {accountTotals.credit > 0 ? '+' : ''}{formatCurrency(accountTotals.credit)}
-                          </p>
-                        </div>
-                        <div className="rounded-lg border border-[#E6E0D4] bg-[#FCFAF8] px-3 py-2">
-                          <p className="text-[10px] font-black text-[#6D5443] uppercase tracking-widest">잔고</p>
-                          <p className={`mt-1 text-[18px] font-black font-mono tracking-tight truncate ${accountTotals.balance >= 0 ? theme.text : 'text-[#C62828]'}`}>
-                            {accountTotals.balance > 0 ? '+' : ''}{formatCurrency(accountTotals.balance)}
-                          </p>
-                        </div>
+                        {SUMMARY_METRIC_ORDER.map(metricKey => {
+                          const metric = SUMMARY_METRICS[metricKey];
+                          const metricValue = metric.getValue(accountTotals);
+                          const selected = isSummarySelected(account.id, metricKey);
+                          const valueTextClass = metricValue < 0 ? 'text-[#C62828]' : (metricKey === 'balance' ? theme.text : metric.textClass);
+                          return (
+                            <button
+                              key={metricKey}
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); toggleSummarySelection(account.id, metricKey); }}
+                              className={`relative text-left rounded-lg border px-3 py-2 transition-all shadow-sm select-none ${metric.cardClass}
+                                ${selected ? `ring-2 ring-offset-1 ${metric.selectedClass}` : 'hover:-translate-y-0.5 hover:shadow-md'}
+                              `}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <p className={`text-[10px] font-black uppercase tracking-widest ${valueTextClass}`}>{metric.label}</p>
+                                <i className={`ph-bold ${selected ? 'ph-check-circle' : metric.icon} ${valueTextClass}`} style={{fontSize: 15}}></i>
+                              </div>
+                              <p className={`mt-1 font-black font-mono truncate ${metricKey === 'balance' ? 'text-[18px] tracking-tight' : 'text-[15px]'} ${valueTextClass}`}>
+                                {formatSignedCurrency(metricValue)}
+                              </p>
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -1279,22 +1349,41 @@
           </div>
 
           {/* 3. 다중 선택 계산기 바 */}
-          {selectedItems.length > 0 && (
-            <div className="selection-bar fixed bottom-8 left-1/2 -translate-x-1/2 bg-[#2A1D15] text-[#FDFCFB] px-8 py-4 rounded-full shadow-2xl flex items-center gap-8 z-40 animate-in slide-in-from-bottom-4 border border-[#4A3B32]">
-              <div className="flex items-center gap-3">
-                <i className="ph-fill ph-calculator text-[#D2B48C]" style={{fontSize: 20}}></i>
-                <span className="text-sm font-bold"><span className="text-[#D2B48C] text-lg mr-1">{selectedItems.length}</span>개 선택됨</span>
+          {calculationItems.length > 0 && (
+            <div className="selection-bar fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[min(92vw,620px)] rounded-2xl border border-[#D2B48C] bg-[#241913]/95 text-[#FDFCFB] shadow-2xl backdrop-blur-xl p-4 animate-in zoom-in-95">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-11 h-11 rounded-xl bg-[#D2B48C] text-[#2A1D15] flex items-center justify-center shrink-0 shadow-inner">
+                    <i className="ph-fill ph-calculator" style={{fontSize: 22}}></i>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-black text-[#D2B48C] uppercase tracking-widest">선택 합산금액</p>
+                    <p className="text-xs font-bold text-[#CDBFAF] truncate">
+                      박스 {selectedItems.length}개 · 통장요약 {selectedSummaryItems.length}개
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className={`text-3xl font-black font-mono tracking-tight ${selectedSum >= 0 ? 'text-[#9BE7A8]' : 'text-[#FF8A80]'}`}>
+                    {formatSignedCurrency(selectedSum)}
+                  </p>
+                </div>
+                <button onClick={clearCalculationSelection} className="p-2.5 bg-[#3B2A21] hover:bg-[#5A4033] rounded-full transition-colors text-white shrink-0">
+                  <i className="ph-bold ph-x" style={{fontSize: 18}}></i>
+                </button>
               </div>
-              <div className="w-px h-6 bg-[#4A3B32]" />
-              <div className="flex items-center gap-4">
-                <span className="text-xs font-bold text-[#A69C8E] uppercase tracking-widest">잔고 반영 합산</span>
-                <span className={`text-2xl font-black font-mono tracking-tight ${selectedSum >= 0 ? 'text-[#81C784]' : 'text-[#E57373]'}`}>
-                  {selectedSum > 0 ? '+' : ''}{formatCurrency(selectedSum)}
-                </span>
+              <div className="mt-3 flex flex-wrap gap-1.5 max-h-20 overflow-hidden">
+                {calculationItems.slice(0, 8).map(item => (
+                  <span key={item.key} className="max-w-[180px] truncate rounded-full border border-[#4A3B32] bg-white/10 px-2.5 py-1 text-[11px] font-bold text-[#EADFD4]">
+                    {item.accountName ? `${item.accountName} · ${item.metricLabel}` : item.label}
+                  </span>
+                ))}
+                {calculationItems.length > 8 && (
+                  <span className="rounded-full border border-[#4A3B32] bg-white/10 px-2.5 py-1 text-[11px] font-bold text-[#D2B48C]">
+                    +{calculationItems.length - 8}
+                  </span>
+                )}
               </div>
-              <button onClick={() => setSelectedBlocks([])} className="ml-2 p-2 bg-[#4A3B32] hover:bg-[#6B4423] rounded-full transition-colors text-white">
-                <i className="ph-bold ph-x" style={{fontSize: 18}}></i>
-              </button>
             </div>
           )}
 
