@@ -276,6 +276,62 @@
         return text.split(/[,，\/|]+/).map(name => name.trim()).filter(Boolean);
       };
 
+      const getCollapsibleBlockIds = (targetBlocks) => targetBlocks.filter(block => block.subItems && block.subItems.length > 0).map(block => block.id);
+      const getVatReports = (account) => Array.isArray(account?.vatReports) ? account.vatReports.filter(item => item && (item.date || item.amount)) : [];
+      const parseMoneyInput = (value) => parseInt(String(value || '').replace(/[^0-9-]/g, ''), 10) || 0;
+      const sanitizeFileName = (value) => String(value || 'report').replace(/[\\/:*?"<>|]/g, '_');
+      const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+
+      const collectReportRows = (blocksForReport) => {
+        const rows = [];
+        blocksForReport.forEach(block => {
+          const blockAmount = getBlockAmount(block);
+          rows.push({ level: '대분류', label: block.label, amount: blockAmount, status: block.isPlanned ? '외상' : '' });
+          (block.subItems || []).forEach(sub => {
+            rows.push({ level: '중분류', label: sub.label, amount: getSubItemAmount(sub), status: sub.isPlanned ? '외상' : '' });
+            getChildItems(sub).forEach(child => {
+              rows.push({ level: '소분류', label: child.label, amount: getAmountValue(child), status: child.isPlanned ? '외상' : '' });
+            });
+          });
+        });
+        return rows;
+      };
+
+      const downloadReportAsExcel = (account, report) => {
+        const rows = collectReportRows(report.blocks || []);
+        const total = (report.blocks || []).reduce((sum, block) => sum + getEffectiveAmount(block), 0);
+        const tableRows = rows.map(row => `
+          <tr>
+            <td>${escapeHtml(row.level)}</td>
+            <td>${escapeHtml(row.label)}</td>
+            <td style="mso-number-format:'\\#\\,\\#\\#0'; text-align:right;">${row.amount}</td>
+            <td>${escapeHtml(row.status)}</td>
+          </tr>
+        `).join('');
+        const html = `
+          <html>
+            <head><meta charset="UTF-8"></head>
+            <body>
+              <table border="1">
+                <tr><th colspan="4">${escapeHtml(account.name)} ${escapeHtml(report.month)} 결산서</th></tr>
+                <tr><td>최종 결산액</td><td colspan="3" style="mso-number-format:'\\#\\,\\#\\#0'; text-align:right;">${total}</td></tr>
+                <tr><th>구분</th><th>내역</th><th>금액</th><th>상태</th></tr>
+                ${tableRows}
+              </table>
+            </body>
+          </html>
+        `;
+        const blob = new Blob(['\ufeff', html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${sanitizeFileName(account.name)}_${sanitizeFileName(report.month)}_결산서.xls`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      };
+
       /* --- 💡 자동 정리(Auto Cleanup) 엔진 (빈 껍데기 박멸) --- */
       const cleanupBlocks = (blocksArray) => {
         return blocksArray.map(b => {
@@ -340,15 +396,15 @@
         const { type, id } = splitSelectionKey(selectionKey);
         for (const block of blocks) {
           if (type === 'block' && block.id === id) {
-            return { key: getSelectionKey('block', block.id), type, id, blockId: block.id, label: block.label, amount: getEffectiveAmount(block) };
+            return { key: getSelectionKey('block', block.id), type, id, blockId: block.id, label: block.label, amount: getUniversalAmount(block) };
           }
           for (const sub of (block.subItems || [])) {
             if (type === 'sub' && sub.id === id) {
-              return { key: getSelectionKey('sub', sub.id), type, id, blockId: block.id, subItemId: sub.id, label: sub.label, amount: getSubEffectiveAmount(sub) };
+              return { key: getSelectionKey('sub', sub.id), type, id, blockId: block.id, subItemId: sub.id, label: sub.label, amount: getUniversalAmount(sub) };
             }
             for (const child of getChildItems(sub)) {
               if (type === 'child' && child.id === id) {
-                return { key: getSelectionKey('child', child.id), type, id, blockId: block.id, subItemId: sub.id, childId: child.id, label: child.label, amount: getChildEffectiveAmount(child) };
+                return { key: getSelectionKey('child', child.id), type, id, blockId: block.id, subItemId: sub.id, childId: child.id, label: child.label, amount: getUniversalAmount(child) };
               }
             }
           }
@@ -452,7 +508,13 @@
           .then(data => {
             if (data && Object.keys(data).length > 0) {
               if (Array.isArray(data.accountsData)) setAccountsData(data.accountsData);
-              if (Array.isArray(data.blocks)) setBlocks(cleanupBlocks(data.blocks));
+              if (Array.isArray(data.blocks)) {
+                const loadedBlocks = cleanupBlocks(data.blocks);
+                setBlocks(loadedBlocks);
+                setCollapsedSubItems(getCollapsibleBlockIds(loadedBlocks));
+              } else {
+                setCollapsedSubItems(getCollapsibleBlockIds(INITIAL_BLOCKS));
+              }
               if (data.lastSavedAt) setLastSavedAt(data.lastSavedAt);
             }
             setIsInitialLoading(false);
@@ -644,7 +706,7 @@
                  }
                  if (extracted.subItems && extracted.subItems.length > 0) newSubs.push(...extracted.subItems.map(i => ({...i, id: createId('s')})));
                  else newSubs.push(toSub(extracted));
-                 return { ...b, label: newLabel, amount: 0, subItems: newSubs }; // 부모 금액은 0으로 지우고 하위에서 계산
+                 return { ...b, label: newLabel, amount: 0, isPlanned: !!(b.isPlanned || extracted.isPlanned), subItems: newSubs }; // 부모 금액은 0으로 지우고 하위에서 계산
               }
               let newSubs = (b.subItems || []).map(s => {
                 if (targetType === 'sub' && s.id === targetId) {
@@ -657,7 +719,7 @@
                    
                    // 중분류끼리 합칠 때는 순수하게 자체 금액만 더합니다.
                    const mergedAmount = getAmountValue(s) + extAmount;
-                   return { ...s, label: newLabel, amount: mergedAmount, childItems: newChildren };
+                   return { ...s, label: newLabel, amount: mergedAmount, isPlanned: !!(s.isPlanned || extracted.isPlanned), childItems: newChildren };
                 }
                 return s;
               });
@@ -797,9 +859,22 @@
         });
       };
 
-      const addNewAccount = () => setAccountsData([...accountsData, { id: createId('acc'), name: '새로운 현장', bank: '은행명', accountNo: '계좌번호 입력', icon: 'ph-fill ph-hard-hat', theme: 'slate', cardHolder: '이사님', reportData: [] }]);
-      const openSettingsModal = (account) => setSettingsModal({ isOpen: true, accountData: { ...account, cardHolder: account.cardHolder || DEFAULT_CARD_HOLDERS[account.id] || '' } });
-      const saveSettings = (e) => { e.preventDefault(); setAccountsData(prev => prev.map(acc => acc.id === settingsModal.accountData.id ? settingsModal.accountData : acc)); setSettingsModal({ isOpen: false, accountData: null }); };
+      const addNewAccount = () => setAccountsData([...accountsData, { id: createId('acc'), name: '새로운 현장', bank: '은행명', accountNo: '계좌번호 입력', icon: 'ph-fill ph-hard-hat', theme: 'slate', cardHolder: '이사님', vatReports: [], reportData: [] }]);
+      const openSettingsModal = (account) => setSettingsModal({ isOpen: true, accountData: { ...account, cardHolder: account.cardHolder || DEFAULT_CARD_HOLDERS[account.id] || '', vatReports: Array.from({ length: 4 }, (_, idx) => (account.vatReports && account.vatReports[idx]) || { date: '', amount: '' }) } });
+      const updateSettingsVatReport = (index, field, value) => setSettingsModal(prev => {
+        const vatReports = Array.from({ length: 4 }, (_, idx) => (prev.accountData.vatReports && prev.accountData.vatReports[idx]) || { date: '', amount: '' });
+        vatReports[index] = { ...vatReports[index], [field]: field === 'amount' ? value.replace(/[^0-9-]/g, '') : value };
+        return { ...prev, accountData: { ...prev.accountData, vatReports } };
+      });
+      const saveSettings = (e) => {
+        e.preventDefault();
+        const normalizedVatReports = (settingsModal.accountData.vatReports || [])
+          .map(item => ({ date: item.date || '', amount: item.amount || '' }))
+          .filter(item => item.date || item.amount);
+        const accountData = { ...settingsModal.accountData, vatReports: normalizedVatReports };
+        setAccountsData(prev => prev.map(acc => acc.id === accountData.id ? accountData : acc));
+        setSettingsModal({ isOpen: false, accountData: null });
+      };
       
       const openCreateModal = (accountId) => setModal({ isOpen: true, mode: 'create', amountInput: '', blockData: { id: createId('b_new'), accountId, label: '새 내역', amount: 0, color: 'none', isPlanned: false, subItems: [] } });
       const openEditModal = (block) => setModal({ isOpen: true, mode: 'edit', amountInput: block.amount === 0 && block.subItems?.length > 0 ? '' : formatCurrency(block.amount), blockData: { ...block, subItems: block.subItems ? [...block.subItems] : [] } });
@@ -1069,6 +1144,18 @@
                           </span>
                         ))}
                       </div>
+                      {getVatReports(account).length > 0 && (
+                        <div className="ml-10 mb-1 flex flex-col gap-1 pointer-events-none">
+                          {getVatReports(account).map((vat, idx) => (
+                            <div key={`${vat.date}-${idx}`} className="inline-flex w-fit items-center gap-1.5 rounded-md border border-[#D2B48C] bg-white/80 px-2 py-0.5 text-[10px] font-black text-[#8B5A2B] shadow-sm">
+                              <i className="ph-fill ph-receipt" style={{fontSize: 11}}></i>
+                              <span>부가세 {idx + 1}</span>
+                              {vat.date && <span>{vat.date}</span>}
+                              {vat.amount && <span className="font-mono">{formatCurrency(parseMoneyInput(vat.amount))}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#6D5443] ml-10 opacity-80 pointer-events-none">
                         <i className="ph-fill ph-credit-card" style={{fontSize: 12}}></i> {account.bank} | <span className="font-mono">{account.accountNo}</span>
                       </div>
@@ -1452,6 +1539,32 @@
                       <label className="block text-xs font-extrabold text-[#6D5443] mb-1.5 uppercase">카드 보유자</label>
                       <input type="text" value={settingsModal.accountData.cardHolder || ''} onChange={(e) => setSettingsModal(p => ({...p, accountData: {...p.accountData, cardHolder: e.target.value}}))} className="w-full border border-[#DFD8CE] rounded-lg p-2.5 text-sm font-bold text-[#2A1D15] focus:border-[#8B5A2B] focus:outline-none" placeholder="예: 이사님, 대표"/>
                     </div>
+                    <div>
+                      <label className="block text-xs font-extrabold text-[#6D5443] mb-2 uppercase">부가세 신고 기록</label>
+                      <div className="space-y-2 rounded-lg border border-[#DFD8CE] bg-[#FCFAF8] p-3">
+                        {Array.from({ length: 4 }).map((_, idx) => {
+                          const vat = (settingsModal.accountData.vatReports && settingsModal.accountData.vatReports[idx]) || { date: '', amount: '' };
+                          return (
+                            <div key={idx} className="grid grid-cols-[56px_1fr_1fr] gap-2 items-center">
+                              <span className="text-[11px] font-black text-[#8B5A2B]">신고 {idx + 1}</span>
+                              <input
+                                type="date"
+                                value={vat.date || ''}
+                                onChange={(e) => updateSettingsVatReport(idx, 'date', e.target.value)}
+                                className="w-full border border-[#DFD8CE] rounded-lg p-2 text-[11px] font-bold text-[#2A1D15] focus:border-[#8B5A2B] focus:outline-none"
+                              />
+                              <input
+                                type="text"
+                                value={vat.amount ? formatCurrency(parseMoneyInput(vat.amount)) : ''}
+                                onChange={(e) => updateSettingsVatReport(idx, 'amount', e.target.value)}
+                                className="w-full border border-[#DFD8CE] rounded-lg p-2 text-[11px] font-mono font-bold text-right text-[#2A1D15] focus:border-[#8B5A2B] focus:outline-none"
+                                placeholder="금액"
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="mb-8">
@@ -1642,7 +1755,10 @@
                             </button>
                           </div>
 
-                          <div className="p-4 border-t border-[#E6E0D4] bg-[#FCFAF8] rounded-b-2xl shrink-0 flex justify-end">
+                          <div className="p-4 border-t border-[#E6E0D4] bg-[#FCFAF8] rounded-b-2xl shrink-0 flex justify-between items-center gap-2">
+                            <button onClick={() => downloadReportAsExcel(reportAccount, activeReport)} className="text-[11px] font-bold text-[#2E7D32] hover:bg-[#E8F5E9] border border-[#C8E6C9] bg-white rounded-lg flex items-center gap-1 px-2.5 py-1.5 transition-colors">
+                              <i className="ph-bold ph-file-xls" style={{fontSize: 12}}></i> 엑셀 다운로드
+                            </button>
                             <button onClick={() => deleteEntireReport(activeReport.id)} className="text-[11px] font-bold text-[#C62828] hover:underline flex items-center gap-1 px-2 py-1">
                               <i className="ph-bold ph-trash" style={{fontSize: 12}}></i> 이 달의 결산 삭제
                             </button>
