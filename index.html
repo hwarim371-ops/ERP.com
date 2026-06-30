@@ -446,32 +446,29 @@
 
         const totals = targetBlocks.reduce((acc, block) => {
           const subItems = block.subItems || [];
+          if (block.isPlanned) {
+            acc.credit += getBlockAmount(block);
+            return acc;
+          }
           if (subItems.length === 0) {
-            const amount = getAmountValue(block);
-            if (block.isPlanned) acc.credit += amount;
-            else addMediumAmount(acc, amount);
+            addMediumAmount(acc, getAmountValue(block));
             return acc;
           }
 
           subItems.forEach(sub => {
-            const subAmount = getSubItemAmount(sub);
-            if (block.isPlanned || sub.isPlanned) {
-              acc.credit += subAmount;
+            if (sub.isPlanned) {
+              acc.credit += getSubItemAmount(sub);
               return;
             }
 
-            addMediumAmount(acc, subAmount);
+            addMediumAmount(acc, getSubEffectiveAmount(sub));
             addCheckedChildrenToCredit(acc, sub);
           });
 
           return acc;
         }, { income: 0, expense: 0, credit: 0 });
 
-        const balance = targetBlocks.reduce((sum, block) => {
-          if (block.isPlanned) return sum;
-          const blockAmount = getBlockAmount(block);
-          return blockAmount > 0 ? sum + blockAmount : sum;
-        }, 0);
+        const balance = targetBlocks.reduce((sum, block) => sum + getEffectiveAmount(block), 0);
         return { ...totals, balance };
       };
 
