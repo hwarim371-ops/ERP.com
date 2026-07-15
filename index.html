@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
@@ -214,6 +214,7 @@
         try { return JSON.parse(text); }
         catch (e) { throw new Error("구글 스크립트에서 데이터를 읽지 못했습니다."); }
       };
+      const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
       const applyCloudSnapshot = (data) => {
         if (data && Object.keys(data).length > 0) {
           if (Array.isArray(data.accountsData)) setAccountsData(data.accountsData);
@@ -558,10 +559,20 @@
         try {
           const savedAt = new Date().toISOString();
           const payload = { accountsData, blocks: blocks.map(block => ({ ...block, id: block.id || createId('b') })), lastSavedAt: savedAt };
-          await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
+          const response = await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
+          if (!response.ok) throw new Error(`저장 요청 실패: HTTP ${response.status}`);
+          await wait(1200);
+          const savedSnapshot = await loadCloudSnapshot();
+          if (!savedSnapshot || savedSnapshot.lastSavedAt !== savedAt) {
+            const serverTime = savedSnapshot && savedSnapshot.lastSavedAt ? formatLastSavedAt(savedSnapshot.lastSavedAt) : '확인 불가';
+            throw new Error(`저장 검증 실패: 서버 저장시간이 갱신되지 않았습니다.\n현재 서버 시간: ${serverTime}`);
+          }
           setLastSavedAt(savedAt);
           openDialog('alert', "✅ 안전하게 백업 및 동기화되었습니다!");
-        } catch (err) { openDialog('alert', "❌ 동기화 오류가 발생했습니다."); } finally { setIsSyncing(false); }
+        } catch (err) {
+          console.error('Cloud sync failed:', err);
+          openDialog('alert', `❌ 동기화 오류가 발생했습니다.\n\n원인: ${err.message || '구글시트 저장 연결 실패'}`);
+        } finally { setIsSyncing(false); }
       };
 
       /* --- 드래그 중 자동 스크롤 --- */
@@ -2030,3 +2041,4 @@
   </script>
 </body>
 </html>
+
