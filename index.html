@@ -525,10 +525,20 @@
         try {
           const savedAt = new Date().toISOString();
           const payload = { accountsData, blocks: blocks.map(block => ({ ...block, id: block.id || createId('b') })), lastSavedAt: savedAt };
-          await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
+          const body = JSON.stringify(payload);
+          try {
+            const response = await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body });
+            if (!response.ok) throw new Error(`HTTP_${response.status}`);
+          } catch (primaryErr) {
+            console.warn('Primary cloud sync failed. Retrying with Apps Script safe mode.', primaryErr);
+            await fetch(GAS_URL, { method: "POST", mode: "no-cors", headers: { "Content-Type": "text/plain;charset=utf-8" }, body });
+          }
           setLastSavedAt(savedAt);
           openDialog('alert', "✅ 안전하게 백업 및 동기화되었습니다!");
-        } catch (err) { openDialog('alert', "❌ 동기화 오류가 발생했습니다."); } finally { setIsSyncing(false); }
+        } catch (err) {
+          console.error('Cloud sync failed:', err);
+          openDialog('alert', `❌ 동기화 오류가 발생했습니다.\n\n원인: ${err.message || '네트워크 또는 구글 스크립트 연결 실패'}`);
+        } finally { setIsSyncing(false); }
       };
 
       /* --- 드래그 중 자동 스크롤 --- */
