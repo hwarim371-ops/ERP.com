@@ -215,21 +215,17 @@
         catch (e) { throw new Error("구글 스크립트에서 데이터를 읽지 못했습니다."); }
       };
       const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+      const isValidCloudSnapshot = (data) => !!(data && Array.isArray(data.accountsData) && Array.isArray(data.blocks));
       const applyCloudSnapshot = (data) => {
-        if (data && Object.keys(data).length > 0) {
-          if (Array.isArray(data.accountsData)) setAccountsData(data.accountsData);
-          if (Array.isArray(data.blocks)) {
-            const loadedBlocks = cleanupBlocks(data.blocks);
-            setBlocks(loadedBlocks);
-            setCollapsedSubItems(getCollapsibleBlockIds(loadedBlocks));
-          } else {
-            setCollapsedSubItems(getCollapsibleBlockIds(INITIAL_BLOCKS));
-          }
-          if (data.lastSavedAt) setLastSavedAt(data.lastSavedAt);
-          return true;
+        if (!isValidCloudSnapshot(data)) {
+          throw new Error("클라우드 데이터 형식이 올바르지 않습니다. 저장소가 비어있거나 손상된 응답입니다.");
         }
-        setCollapsedSubItems(getCollapsibleBlockIds(INITIAL_BLOCKS));
-        return false;
+        setAccountsData(data.accountsData);
+        const loadedBlocks = cleanupBlocks(data.blocks);
+        setBlocks(loadedBlocks);
+        setCollapsedSubItems(getCollapsibleBlockIds(loadedBlocks));
+        if (data.lastSavedAt) setLastSavedAt(data.lastSavedAt);
+        return true;
       };
       
       /* --- 💡 완벽 무결점 계산 엔진 --- */
@@ -571,7 +567,7 @@
           }
           await wait(1800);
           const savedSnapshot = await loadCloudSnapshot();
-          if (!savedSnapshot || savedSnapshot.lastSavedAt !== savedAt) {
+          if (!isValidCloudSnapshot(savedSnapshot) || savedSnapshot.lastSavedAt !== savedAt) {
             const serverTime = savedSnapshot && savedSnapshot.lastSavedAt ? formatLastSavedAt(savedSnapshot.lastSavedAt) : '확인 불가';
             const blockedReason = primaryError ? `\n브라우저 차단 원인: ${primaryError.message || primaryError}` : '';
             throw new Error(`저장 검증 실패: 서버 저장시간이 갱신되지 않았습니다.\n현재 서버 시간: ${serverTime}${blockedReason}`);
