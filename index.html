@@ -559,13 +559,22 @@
         try {
           const savedAt = new Date().toISOString();
           const payload = { accountsData, blocks: blocks.map(block => ({ ...block, id: block.id || createId('b') })), lastSavedAt: savedAt };
-          const response = await fetch(GAS_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
-          if (!response.ok) throw new Error(`저장 요청 실패: HTTP ${response.status}`);
-          await wait(1200);
+          const body = JSON.stringify(payload);
+          let primaryError = null;
+          try {
+            const response = await fetch(GAS_URL, { method: "POST", body });
+            if (!response.ok) throw new Error(`저장 요청 실패: HTTP ${response.status}`);
+          } catch (err) {
+            primaryError = err;
+            console.warn('Primary cloud sync failed. Retrying with no-cors mode.', err);
+            await fetch(GAS_URL, { method: "POST", mode: "no-cors", body });
+          }
+          await wait(1800);
           const savedSnapshot = await loadCloudSnapshot();
           if (!savedSnapshot || savedSnapshot.lastSavedAt !== savedAt) {
             const serverTime = savedSnapshot && savedSnapshot.lastSavedAt ? formatLastSavedAt(savedSnapshot.lastSavedAt) : '확인 불가';
-            throw new Error(`저장 검증 실패: 서버 저장시간이 갱신되지 않았습니다.\n현재 서버 시간: ${serverTime}`);
+            const blockedReason = primaryError ? `\n브라우저 차단 원인: ${primaryError.message || primaryError}` : '';
+            throw new Error(`저장 검증 실패: 서버 저장시간이 갱신되지 않았습니다.\n현재 서버 시간: ${serverTime}${blockedReason}`);
           }
           setLastSavedAt(savedAt);
           openDialog('alert', "✅ 안전하게 백업 및 동기화되었습니다!");
