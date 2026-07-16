@@ -46,6 +46,7 @@
 
     const createId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     const GAS_URL = "https://script.google.com/macros/s/AKfycbyzmdTEBrfbcJsuvr29xOhaemgR3dUsHr8DybTq48dJADT7nHXRTcADK8kafHrdz3tK/exec";
+    const LOCAL_BACKUP_KEY = 'hwarim_erp_cloud_backups_v1';
     
     const COLUMN_THEMES = {
       wood: { label: '클래식 우드', text: 'text-[#8B5A2B]', bg: 'bg-[#8B5A2B]', light: 'bg-[#EFEBE4]', hover: 'hover:bg-[#DFD8CE]', border: 'border-[#8B5A2B]', ring: 'ring-[#8B5A2B]', panelBg: 'bg-[#F4EBE1]' },
@@ -216,10 +217,34 @@
       };
       const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
       const isValidCloudSnapshot = (data) => !!(data && Array.isArray(data.accountsData) && Array.isArray(data.blocks));
+      const blockSignature = (targetBlocks) => (targetBlocks || []).map(block => `${block.accountId}|${block.label}|${Number(block.amount) || 0}|${(block.subItems || []).length}`).join(';;');
+      const initialBlockSignature = blockSignature(INITIAL_BLOCKS);
+      const isInitialDemoBlocks = (targetBlocks) => (targetBlocks || []).length === INITIAL_BLOCKS.length && blockSignature(targetBlocks) === initialBlockSignature;
+      const isInitialDemoSnapshot = (data) => isValidCloudSnapshot(data) && data.accountsData.length === INITIAL_ACCOUNTS.length && isInitialDemoBlocks(data.blocks);
+      const isCurrentInitialDemo = () => accountsData.length === INITIAL_ACCOUNTS.length && isInitialDemoBlocks(blocks);
+      const backupCloudSnapshot = (data, reason = 'cloud-load') => {
+        if (!isValidCloudSnapshot(data) || isInitialDemoSnapshot(data)) return;
+        try {
+          const backups = JSON.parse(localStorage.getItem(LOCAL_BACKUP_KEY) || '[]');
+          backups.unshift({
+            reason,
+            backedUpAt: new Date().toISOString(),
+            lastSavedAt: data.lastSavedAt || '',
+            data,
+          });
+          localStorage.setItem(LOCAL_BACKUP_KEY, JSON.stringify(backups.slice(0, 20)));
+        } catch (err) {
+          console.warn('Local backup failed:', err);
+        }
+      };
       const applyCloudSnapshot = (data) => {
         if (!isValidCloudSnapshot(data)) {
           throw new Error("클라우드 데이터 형식이 올바르지 않습니다. 저장소가 비어있거나 손상된 응답입니다.");
         }
+        if (isInitialDemoSnapshot(data)) {
+          throw new Error("클라우드에 초기 샘플 자료가 저장되어 있습니다. 기존 장부를 보호하기 위해 불러오기를 중단했습니다.");
+        }
+        backupCloudSnapshot(data);
         setAccountsData(data.accountsData);
         const loadedBlocks = cleanupBlocks(data.blocks);
         setBlocks(loadedBlocks);
@@ -383,6 +408,95 @@
       const closeDialog = () => setDialog({ isOpen: false, type: '', message: '', defaultValue: '', onConfirm: null });
       const handleDialogConfirm = (val) => { if (dialog.onConfirm) dialog.onConfirm(val); closeDialog(); };
 
+      const buildCurrentSnapshot = (savedAt = lastSavedAt || new Date().toISOString()) => ({
+        accountsData,
+        blocks: blocks.map(block => ({ ...block, id: block.id || createId('b') })),
+        lastSavedAt: savedAt,
+      });
+
+      const getLocalBackupEntries = () => {
+        try {
+          const backups = JSON.parse(localStorage.getItem(LOCAL_BACKUP_KEY) || '[]');
+          return Array.isArray(backups) ? backups : [];
+        } catch (err) {
+          console.warn('Local backup read failed:', err);
+          return [];
+        }
+      };
+
+      const getLatestLocalBackup = () => getLocalBackupEntries().find(entry => (
+        entry && isValidCloudSnapshot(entry.data) && !isInitialDemoSnapshot(entry.data)
+      ));
+
+      const downloadJsonFile = (data, filename) => {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      };
+
+      const exportCurrentData = () => {
+        if (isCurrentInitialDemo()) {
+          return openDialog('alert', '현재 화면이 초기 샘플 자료라서 백업 파일을 만들지 않았습니다.');
+        }
+        const snapshot = buildCurrentSnapshot();
+        backupCloudSnapshot(snapshot, 'manual-export');
+        downloadJsonFile(snapshot, `hwarim-erp-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+        openDialog('alert', '현재 화면 자료를 백업 파일로 저장했습니다.');
+      };
+
+      const applyLocalBackupEntry = (entry) => {
+        if (!entry || !isValidCloudSnapshot(entry.data)) return false;
+        applyCloudSnapshot(entry.data);
+        return true;
+      };
+
+      const restoreLatestLocalBackup = () => {
+        try {
+          const latestBackup = getLatestLocalBackup();
+          if (!latestBackup) return openDialog('alert', '이 PC에 복구할 수 있는 로컬 백업이 아직 없습니다.');
+          applyLocalBackupEntry(latestBackup);
+          openDialog('alert', `이 PC에 저장된 백업을 불러왔습니다.\n\n백업 시간: ${formatLastSavedAt(latestBackup.lastSavedAt || latestBackup.data.lastSavedAt)}`);
+        } catch (err) {
+          console.error('Local restore failed:', err);
+          openDialog('alert', `로컬 백업 복구에 실패했습니다.\n\n원인: ${err.message || '백업 파일 오류'}`);
+        }
+      };
+
+      const importBackupFile = (event) => {
+        const file = event.target.files && event.target.files[0];
+        event.target.value = '';
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const parsed = JSON.parse(reader.result);
+            const snapshot = parsed && isValidCloudSnapshot(parsed.data) ? parsed.data : parsed;
+            if (!isValidCloudSnapshot(snapshot)) throw new Error('백업 파일 안에 ERP 자료가 없습니다.');
+            applyCloudSnapshot({ ...snapshot, lastSavedAt: snapshot.lastSavedAt || new Date().toISOString() });
+            openDialog('alert', '백업 파일을 화면에 불러왔습니다.\n\n내용을 확인한 뒤 문제가 없으면 클라우드 저장을 눌러 서버에 반영하세요.');
+          } catch (err) {
+            console.error('Backup import failed:', err);
+            openDialog('alert', `백업 파일을 불러오지 못했습니다.\n\n원인: ${err.message || '파일 형식 오류'}`);
+          }
+        };
+        reader.onerror = () => openDialog('alert', '백업 파일을 읽지 못했습니다.');
+        reader.readAsText(file);
+      };
+
+      const openImportBackupPicker = () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'application/json,.json';
+        input.onchange = importBackupFile;
+        input.click();
+      };
+
       // 변환 헬퍼 (드래그 시 금액 손실 방지 적용 - 안전한 색상 매핑)
       const toBlock = (item, accountId) => {
         const uAmt = getUniversalAmount(item);
@@ -529,6 +643,17 @@
           })
           .catch(err => {
             console.error('Cloud load failed:', err);
+            const latestBackup = getLatestLocalBackup();
+            if (latestBackup) {
+              try {
+                applyLocalBackupEntry(latestBackup);
+                setIsInitialLoading(false);
+                openDialog('alert', `최신 데이터를 불러오지 못해 이 PC의 로컬 백업을 먼저 복구했습니다.\n\n원인: ${err.message || '구글시트 연결 실패'}\n백업 시간: ${formatLastSavedAt(latestBackup.lastSavedAt || latestBackup.data.lastSavedAt)}`);
+                return;
+              } catch (restoreErr) {
+                console.error('Auto local restore failed:', restoreErr);
+              }
+            }
             setIsInitialLoading(false);
             openDialog('alert', `최신 데이터를 불러오지 못했습니다.\n\n원인: ${err.message || '구글시트 연결 실패'}`);
           });
@@ -553,8 +678,28 @@
         if (!GAS_URL || GAS_URL.includes("여기에")) return openDialog('alert', "구글 스크립트 웹앱 URL이 입력되지 않았습니다!");
         setIsSyncing(true);
         try {
+          if (isCurrentInitialDemo()) {
+            throw new Error("현재 화면이 초기 샘플 자료입니다. 운영 장부를 덮어쓸 수 있어 클라우드 저장을 중단했습니다.");
+          }
           const savedAt = new Date().toISOString();
-          const payload = { accountsData, blocks: blocks.map(block => ({ ...block, id: block.id || createId('b') })), lastSavedAt: savedAt };
+          const payload = buildCurrentSnapshot(savedAt);
+          backupCloudSnapshot(payload, 'before-save');
+
+          const latestSnapshot = await loadCloudSnapshot();
+          if (!isValidCloudSnapshot(latestSnapshot)) {
+            throw new Error("저장 전 최신 자료 확인에 실패했습니다. 오래된 화면으로 덮어쓰는 것을 막기 위해 저장을 중단했습니다.");
+          }
+          if (!isInitialDemoSnapshot(latestSnapshot)) {
+            const serverSavedAt = latestSnapshot.lastSavedAt || '';
+            const screenSavedAt = lastSavedAt || '';
+            if (!screenSavedAt && serverSavedAt) {
+              throw new Error(`현재 화면의 저장 시간이 없어 서버 자료와 비교할 수 없습니다.\n먼저 최신 불러오기를 눌러주세요.\n현재 서버 시간: ${formatLastSavedAt(serverSavedAt)}`);
+            }
+            if (serverSavedAt && screenSavedAt && serverSavedAt !== screenSavedAt) {
+              throw new Error(`다른 PC에서 더 최근 자료가 저장되어 있습니다.\n먼저 백업 저장을 누른 뒤 최신 불러오기로 서버 자료를 확인해주세요.\n\n내 화면 시간: ${formatLastSavedAt(screenSavedAt)}\n서버 시간: ${formatLastSavedAt(serverSavedAt)}`);
+            }
+          }
+
           const body = JSON.stringify(payload);
           let primaryError = null;
           try {
@@ -567,11 +712,12 @@
           }
           await wait(1800);
           const savedSnapshot = await loadCloudSnapshot();
-          if (!isValidCloudSnapshot(savedSnapshot) || savedSnapshot.lastSavedAt !== savedAt) {
+          if (!isValidCloudSnapshot(savedSnapshot) || isInitialDemoSnapshot(savedSnapshot) || savedSnapshot.lastSavedAt !== savedAt) {
             const serverTime = savedSnapshot && savedSnapshot.lastSavedAt ? formatLastSavedAt(savedSnapshot.lastSavedAt) : '확인 불가';
             const blockedReason = primaryError ? `\n브라우저 차단 원인: ${primaryError.message || primaryError}` : '';
             throw new Error(`저장 검증 실패: 서버 저장시간이 갱신되지 않았습니다.\n현재 서버 시간: ${serverTime}${blockedReason}`);
           }
+          backupCloudSnapshot(savedSnapshot, 'after-save');
           setLastSavedAt(savedAt);
           openDialog('alert', "✅ 안전하게 백업 및 동기화되었습니다!");
         } catch (err) {
@@ -1137,15 +1283,42 @@
               </div>
             </div>
 
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3 shrink-0">
               <div className="text-right max-w-[260px]">
                 <p className="text-[10px] font-extrabold text-[#A69C8E] uppercase tracking-widest">마지막 클라우드 저장</p>
                 <p className="text-[11px] font-bold text-[#6D5443] mt-0.5">{formatLastSavedAt(lastSavedAt)}</p>
               </div>
               <button
+                onClick={exportCurrentData}
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs sm:text-sm font-bold border transition-colors shadow-sm bg-white hover:bg-[#F7F1EA] text-[#6D5443] border-[#E6E0D4]"
+              >
+                <i className="ph-bold ph-download-simple" style={{fontSize: 16}}></i>
+                백업 저장
+              </button>
+              <button
+                onClick={openImportBackupPicker}
+                disabled={isSyncing || isLoadingCloud}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs sm:text-sm font-bold border transition-colors shadow-sm
+                  ${(isSyncing || isLoadingCloud) ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-white hover:bg-[#F7F1EA] text-[#6D5443] border-[#E6E0D4]'}
+                `}
+              >
+                <i className="ph-bold ph-upload-simple" style={{fontSize: 16}}></i>
+                백업 불러오기
+              </button>
+              <button
+                onClick={restoreLatestLocalBackup}
+                disabled={isSyncing || isLoadingCloud}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs sm:text-sm font-bold border transition-colors shadow-sm
+                  ${(isSyncing || isLoadingCloud) ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'}
+                `}
+              >
+                <i className="ph-bold ph-clock-counter-clockwise" style={{fontSize: 16}}></i>
+                로컬 복구
+              </button>
+              <button
                 onClick={refreshFromCloud}
                 disabled={isSyncing || isLoadingCloud}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold border transition-colors shadow-sm
+                className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-bold border transition-colors shadow-sm
                   ${isLoadingCloud ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}
                 `}
               >
@@ -1155,7 +1328,7 @@
               <button 
                 onClick={syncToCloud}
                 disabled={isSyncing || isLoadingCloud}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold border transition-colors shadow-sm
+                className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-bold border transition-colors shadow-sm
                   ${isSyncing ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border-indigo-200'}
                 `}
               >
