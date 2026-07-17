@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>화림 ERP</title>
   
   <script>
@@ -42,11 +45,12 @@
   <div id="root"></div>
 
   <script type="text/babel" data-presets="env,react" data-plugins="transform-react-jsx">
-    const { useState, useMemo, useEffect, Fragment } = React;
+    const { useState, useMemo, useEffect, useRef, Fragment } = React;
 
     const createId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     const GAS_URL = "https://script.google.com/macros/s/AKfycbyzmdTEBrfbcJsuvr29xOhaemgR3dUsHr8DybTq48dJADT7nHXRTcADK8kafHrdz3tK/exec";
     const LOCAL_BACKUP_KEY = 'hwarim_erp_cloud_backups_v1';
+    const getDataFingerprint = (accounts, blockList) => JSON.stringify([accounts || [], blockList || []]);
     
     const COLUMN_THEMES = {
       wood: { label: '클래식 우드', text: 'text-[#8B5A2B]', bg: 'bg-[#8B5A2B]', light: 'bg-[#EFEBE4]', hover: 'hover:bg-[#DFD8CE]', border: 'border-[#8B5A2B]', ring: 'ring-[#8B5A2B]', panelBg: 'bg-[#F4EBE1]' },
@@ -197,6 +201,11 @@
       const [isLoadingCloud, setIsLoadingCloud] = useState(false);
       const [isInitialLoading, setIsInitialLoading] = useState(true);
       const [lastSavedAt, setLastSavedAt] = useState(null);
+      const [lastLoadedFingerprint, setLastLoadedFingerprint] = useState('');
+      const cloudLoadInFlight = useRef(false);
+      const currentDataFingerprint = useMemo(() => getDataFingerprint(accountsData, blocks), [accountsData, blocks]);
+      const hasUnsavedChanges = !!lastLoadedFingerprint && currentDataFingerprint !== lastLoadedFingerprint;
+      const hasOpenEditor = modal.isOpen || splitModal.isOpen || closeMonthModal.isOpen || settingsModal.isOpen || colorModal.isOpen;
 
       /* --- 💡 기본 헬퍼 함수 --- */
       const formatCurrency = (amount) => new Intl.NumberFormat('ko-KR').format(amount || 0);
@@ -211,11 +220,45 @@
       const buildCloudUrl = () => `${GAS_URL}${GAS_URL.includes('?') ? '&' : '?'}t=${Date.now()}`;
       const loadCloudSnapshot = async () => {
         const res = await fetch(buildCloudUrl(), { method: "GET", cache: "no-store" });
+        if (!res.ok) throw new Error(`클라우드 읽기 실패: HTTP ${res.status}`);
         const text = await res.text();
         try { return JSON.parse(text); }
         catch (e) { throw new Error("구글 스크립트에서 데이터를 읽지 못했습니다."); }
       };
       const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+      const isEmbeddedMobileBrowser = () => /KAKAOTALK|NAVER|DAUMAPPS|FBAN|FBAV|INSTAGRAM|LINE\/|;\s*wv\)/i.test(navigator.userAgent || '');
+      const verifyCloudSave = async (savedAt, delays = [700, 1200, 2000, 3000]) => {
+        let latestSnapshot = null;
+        let latestError = null;
+        for (const delay of delays) {
+          await wait(delay);
+          try {
+            latestSnapshot = await loadCloudSnapshot();
+            if (isValidCloudSnapshot(latestSnapshot) && !isInitialDemoSnapshot(latestSnapshot) && latestSnapshot.lastSavedAt === savedAt) {
+              return { saved: true, snapshot: latestSnapshot, error: null };
+            }
+          } catch (err) {
+            latestError = err;
+          }
+        }
+        return { saved: false, snapshot: latestSnapshot, error: latestError };
+      };
+      const submitCloudSnapshot = async (body) => {
+        const options = {
+          method: "POST",
+          mode: "no-cors",
+          cache: "no-store",
+          redirect: "follow",
+          headers: { "Content-Type": "text/plain;charset=UTF-8" },
+          body,
+        };
+        if (new Blob([body]).size < 60000) options.keepalive = true;
+        await fetch(GAS_URL, options);
+      };
+      const sendCloudSnapshotBeacon = (body) => {
+        if (!navigator.sendBeacon || new Blob([body]).size >= 60000) return false;
+        return navigator.sendBeacon(GAS_URL, new Blob([body], { type: 'text/plain;charset=UTF-8' }));
+      };
       const isValidCloudSnapshot = (data) => !!(data && Array.isArray(data.accountsData) && Array.isArray(data.blocks));
       const blockSignature = (targetBlocks) => (targetBlocks || []).map(block => `${block.accountId}|${block.label}|${Number(block.amount) || 0}|${(block.subItems || []).length}`).join(';;');
       const initialBlockSignature = blockSignature(INITIAL_BLOCKS);
@@ -249,6 +292,7 @@
         const loadedBlocks = cleanupBlocks(data.blocks);
         setBlocks(loadedBlocks);
         setCollapsedSubItems(getCollapsibleBlockIds(loadedBlocks));
+        setLastLoadedFingerprint(getDataFingerprint(data.accountsData, loadedBlocks));
         if (data.lastSavedAt) setLastSavedAt(data.lastSavedAt);
         return true;
       };
@@ -636,94 +680,129 @@
 
       useEffect(() => {
         if (!GAS_URL || GAS_URL.includes("여기에")) { setIsInitialLoading(false); return; }
+        cloudLoadInFlight.current = true;
         loadCloudSnapshot()
-          .then(data => {
-            applyCloudSnapshot(data);
-            setIsInitialLoading(false);
-          })
+          .then(data => applyCloudSnapshot(data))
           .catch(err => {
-            console.error('Cloud load failed:', err);
-            const latestBackup = getLatestLocalBackup();
-            if (latestBackup) {
-              try {
-                applyLocalBackupEntry(latestBackup);
-                setIsInitialLoading(false);
-                openDialog('alert', `최신 데이터를 불러오지 못해 이 PC의 로컬 백업을 먼저 복구했습니다.\n\n원인: ${err.message || '구글시트 연결 실패'}\n백업 시간: ${formatLastSavedAt(latestBackup.lastSavedAt || latestBackup.data.lastSavedAt)}`);
-                return;
-              } catch (restoreErr) {
-                console.error('Auto local restore failed:', restoreErr);
-              }
-            }
+            console.error('Initial cloud load failed:', err);
+            openDialog('alert', `최신 데이터를 불러오지 못했습니다.\n\n현재 화면의 샘플 자료는 저장할 수 없습니다. 인터넷 연결을 확인한 뒤 다시 접속해주세요.\n\n원인: ${err.message || '구글시트 연결 실패'}`);
+          })
+          .finally(() => {
+            cloudLoadInFlight.current = false;
             setIsInitialLoading(false);
-            openDialog('alert', `최신 데이터를 불러오지 못했습니다.\n\n원인: ${err.message || '구글시트 연결 실패'}`);
           });
       }, []);
 
-      const refreshFromCloud = async () => {
-        if (!GAS_URL || GAS_URL.includes("여기에")) return openDialog('alert', "구글 스크립트 웹앱 URL이 입력되지 않았습니다!");
+      const refreshFromCloud = async (silent = false) => {
+        if (!GAS_URL || GAS_URL.includes("여기에")) {
+          if (!silent) openDialog('alert', "구글 스크립트 웹앱 URL이 입력되지 않았습니다!");
+          return;
+        }
+        if (cloudLoadInFlight.current || isSyncing || isInitialLoading) return;
+        if (silent && (hasUnsavedChanges || hasOpenEditor)) return;
+
+        cloudLoadInFlight.current = true;
         setIsLoadingCloud(true);
         try {
+          if (!silent && hasUnsavedChanges) backupCloudSnapshot(buildCurrentSnapshot(), 'before-manual-refresh');
           const data = await loadCloudSnapshot();
           applyCloudSnapshot(data);
-          openDialog('alert', "최신 데이터를 불러왔습니다.");
+          if (!silent) openDialog('alert', "최신 데이터를 불러왔습니다.");
         } catch (err) {
           console.error('Cloud refresh failed:', err);
-          openDialog('alert', `최신 데이터를 불러오지 못했습니다.\n\n원인: ${err.message || '구글시트 연결 실패'}`);
+          if (!silent) openDialog('alert', `최신 데이터를 불러오지 못했습니다.\n\n원인: ${err.message || '구글시트 연결 실패'}`);
         } finally {
+          cloudLoadInFlight.current = false;
           setIsLoadingCloud(false);
         }
       };
 
+      useEffect(() => {
+        const refreshWhenActive = () => {
+          if (document.visibilityState !== 'hidden') refreshFromCloud(true);
+        };
+        window.addEventListener('focus', refreshWhenActive);
+        window.addEventListener('pageshow', refreshWhenActive);
+        window.addEventListener('online', refreshWhenActive);
+        document.addEventListener('visibilitychange', refreshWhenActive);
+        return () => {
+          window.removeEventListener('focus', refreshWhenActive);
+          window.removeEventListener('pageshow', refreshWhenActive);
+          window.removeEventListener('online', refreshWhenActive);
+          document.removeEventListener('visibilitychange', refreshWhenActive);
+        };
+      }, [isInitialLoading, isSyncing, hasUnsavedChanges, hasOpenEditor, lastSavedAt]);
+
       const syncToCloud = async () => {
         if (!GAS_URL || GAS_URL.includes("여기에")) return openDialog('alert', "구글 스크립트 웹앱 URL이 입력되지 않았습니다!");
+        if (isInitialLoading || cloudLoadInFlight.current) return;
         setIsSyncing(true);
         try {
           if (isCurrentInitialDemo()) {
-            throw new Error("현재 화면이 초기 샘플 자료입니다. 운영 장부를 덮어쓸 수 있어 클라우드 저장을 중단했습니다.");
+            throw new Error("현재 화면은 초기 샘플 자료입니다. 최신 자료를 불러오기 전에는 클라우드에 저장할 수 없습니다.");
           }
-          const savedAt = new Date().toISOString();
-          const payload = buildCurrentSnapshot(savedAt);
-          backupCloudSnapshot(payload, 'before-save');
 
           const latestSnapshot = await loadCloudSnapshot();
-          if (!isValidCloudSnapshot(latestSnapshot)) {
-            throw new Error("저장 전 최신 자료 확인에 실패했습니다. 오래된 화면으로 덮어쓰는 것을 막기 위해 저장을 중단했습니다.");
-          }
-          if (!isInitialDemoSnapshot(latestSnapshot)) {
-            const serverSavedAt = latestSnapshot.lastSavedAt || '';
-            const screenSavedAt = lastSavedAt || '';
-            if (!screenSavedAt && serverSavedAt) {
-              throw new Error(`현재 화면의 저장 시간이 없어 서버 자료와 비교할 수 없습니다.\n먼저 최신 불러오기를 눌러주세요.\n현재 서버 시간: ${formatLastSavedAt(serverSavedAt)}`);
-            }
-            if (serverSavedAt && screenSavedAt && serverSavedAt !== screenSavedAt) {
-              throw new Error(`다른 PC에서 더 최근 자료가 저장되어 있습니다.\n먼저 백업 저장을 누른 뒤 최신 불러오기로 서버 자료를 확인해주세요.\n\n내 화면 시간: ${formatLastSavedAt(screenSavedAt)}\n서버 시간: ${formatLastSavedAt(serverSavedAt)}`);
-            }
+          if (!isValidCloudSnapshot(latestSnapshot) || isInitialDemoSnapshot(latestSnapshot)) {
+            throw new Error("저장 전 서버의 최신 자료를 확인하지 못했습니다.");
           }
 
+          const serverSavedAt = latestSnapshot.lastSavedAt || '';
+          const screenSavedAt = lastSavedAt || '';
+          const serverBlocks = cleanupBlocks(latestSnapshot.blocks);
+          const serverFingerprint = getDataFingerprint(latestSnapshot.accountsData, serverBlocks);
+          if (!screenSavedAt || serverSavedAt !== screenSavedAt || (lastLoadedFingerprint && serverFingerprint !== lastLoadedFingerprint)) {
+            throw new Error(`다른 기기에서 자료가 변경되었습니다.\n현재 수정본은 이 PC에 자동 백업했으며 서버 자료를 덮어쓰지 않았습니다.\n\n최신 불러오기를 눌러 확인해주세요.\n내 화면: ${formatLastSavedAt(screenSavedAt)}\n서버: ${formatLastSavedAt(serverSavedAt)}`);
+          }
+
+          const savedAt = new Date().toISOString();
+          const payload = buildCurrentSnapshot(savedAt);
           const body = JSON.stringify(payload);
-          let primaryError = null;
+          backupCloudSnapshot(payload, 'before-save');
+
+          let transferError = null;
           try {
-            const response = await fetch(GAS_URL, { method: "POST", body });
-            if (!response.ok) throw new Error(`저장 요청 실패: HTTP ${response.status}`);
+            await submitCloudSnapshot(body);
           } catch (err) {
-            primaryError = err;
-            console.warn('Primary cloud sync failed. Retrying with no-cors mode.', err);
-            await fetch(GAS_URL, { method: "POST", mode: "no-cors", body });
+            transferError = err;
+            console.warn('Cloud submit request was blocked.', err);
           }
-          await wait(1800);
-          const savedSnapshot = await loadCloudSnapshot();
-          if (!isValidCloudSnapshot(savedSnapshot) || isInitialDemoSnapshot(savedSnapshot) || savedSnapshot.lastSavedAt !== savedAt) {
-            const serverTime = savedSnapshot && savedSnapshot.lastSavedAt ? formatLastSavedAt(savedSnapshot.lastSavedAt) : '확인 불가';
-            const blockedReason = primaryError ? `\n브라우저 차단 원인: ${primaryError.message || primaryError}` : '';
-            throw new Error(`저장 검증 실패: 서버 저장시간이 갱신되지 않았습니다.\n현재 서버 시간: ${serverTime}${blockedReason}`);
+
+          let verification = await verifyCloudSave(savedAt);
+          if (!verification.saved) {
+            let beaconQueued = false;
+            try {
+              beaconQueued = sendCloudSnapshotBeacon(body);
+            } catch (err) {
+              transferError = err;
+              console.warn('Cloud beacon retry failed.', err);
+            }
+            if (beaconQueued) verification = await verifyCloudSave(savedAt, [800, 1500, 2500, 3500]);
           }
+
+          if (!verification.saved) {
+            const serverTime = verification.snapshot && verification.snapshot.lastSavedAt
+              ? formatLastSavedAt(verification.snapshot.lastSavedAt)
+              : '확인 불가';
+            const browserHint = isEmbeddedMobileBrowser()
+              ? '\n\n카카오톡 등 앱 내부 브라우저가 구글 저장 요청을 차단했습니다. 오른쪽 위 메뉴에서 이 링크를 삼성 인터넷 또는 크롬으로 열어 저장해주세요.'
+              : '\n\n인터넷 연결을 확인한 뒤 다시 저장해주세요.';
+            const detail = transferError || verification.error;
+            throw new Error(`서버 저장이 확인되지 않았습니다.\n현재 서버: ${serverTime}${detail ? `\n연결 원인: ${detail.message || detail}` : ''}${browserHint}`);
+          }
+
+          const savedSnapshot = verification.snapshot;
+          const savedBlocks = cleanupBlocks(savedSnapshot.blocks);
           backupCloudSnapshot(savedSnapshot, 'after-save');
+          setLastLoadedFingerprint(getDataFingerprint(savedSnapshot.accountsData, savedBlocks));
           setLastSavedAt(savedAt);
-          openDialog('alert', "✅ 안전하게 백업 및 동기화되었습니다!");
+          openDialog('alert', "클라우드에 저장되었습니다.");
         } catch (err) {
           console.error('Cloud sync failed:', err);
-          openDialog('alert', `❌ 동기화 오류가 발생했습니다.\n\n원인: ${err.message || '구글시트 저장 연결 실패'}`);
-        } finally { setIsSyncing(false); }
+          openDialog('alert', `동기화 오류가 발생했습니다.\n\n원인: ${err.message || '구글시트 저장 연결 실패'}`);
+        } finally {
+          setIsSyncing(false);
+        }
       };
 
       /* --- 드래그 중 자동 스크롤 --- */
@@ -1316,7 +1395,7 @@
                 로컬 복구
               </button>
               <button
-                onClick={refreshFromCloud}
+                onClick={() => refreshFromCloud(false)}
                 disabled={isSyncing || isLoadingCloud}
                 className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-bold border transition-colors shadow-sm
                   ${isLoadingCloud ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}
