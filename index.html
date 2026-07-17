@@ -243,16 +243,9 @@
         }
         return { saved: false, snapshot: latestSnapshot, error: latestError };
       };
-      const submitCloudSnapshot = async (body) => {
-        const options = {
-          method: "POST",
-          mode: "no-cors",
-          cache: "no-store",
-          redirect: "follow",
-          headers: { "Content-Type": "text/plain;charset=UTF-8" },
-          body,
-        };
-        if (new Blob([body]).size < 60000) options.keepalive = true;
+      const submitCloudSnapshot = async (body, mode = 'cors') => {
+        const options = { method: "POST", body };
+        if (mode === 'no-cors') options.mode = 'no-cors';
         await fetch(GAS_URL, options);
       };
       const sendCloudSnapshotBeacon = (body) => {
@@ -765,10 +758,20 @@
             await submitCloudSnapshot(body);
           } catch (err) {
             transferError = err;
-            console.warn('Cloud submit request was blocked.', err);
+            console.warn('Cloud response was blocked. Checking whether the POST was saved.', err);
           }
 
-          let verification = await verifyCloudSave(savedAt);
+          let verification = await verifyCloudSave(savedAt, [600, 1000, 1600, 2400]);
+          if (!verification.saved) {
+            try {
+              await submitCloudSnapshot(body, 'no-cors');
+            } catch (err) {
+              transferError = err;
+              console.warn('No-cors cloud retry was blocked.', err);
+            }
+            verification = await verifyCloudSave(savedAt, [800, 1500, 2500]);
+          }
+
           if (!verification.saved) {
             let beaconQueued = false;
             try {
