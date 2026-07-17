@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
@@ -160,7 +160,7 @@
 
     const INITIAL_ACCOUNTS = [
       { id: 'main', name: '화림 법인 (메인)', bank: '우리은행', accountNo: '1005-704-610473', icon: 'ph-fill ph-buildings', theme: 'wood', cardHolder: '대표', reportData: [] },
-      { id: 'jecheon1', name: '제천1 (오차드블리드)', bank: '우리은행', accountNo: '1005-504-710497', icon: 'ph-fill ph-hard-hat', theme: 'forest', cardHolder: '이사님', reportData: [] },
+      { id: 'jecheon1', name: '제천1 (오차드블리스)', bank: '우리은행', accountNo: '1005-504-710497', icon: 'ph-fill ph-hard-hat', theme: 'forest', cardHolder: '이사님', reportData: [] },
       { id: 'miryang', name: '밀양 (다시,또 여기)', bank: '기업은행', accountNo: '587-076008-04-011', icon: 'ph-fill ph-hard-hat', theme: 'ocean', cardHolder: '대표', reportData: [] },
       { id: 'jecheon2', name: '제천2 (덕동골)', bank: '우리은행', accountNo: '1005-804-800910', icon: 'ph-fill ph-hard-hat', theme: 'wine', cardHolder: '이사님', reportData: [] },
     ];
@@ -203,6 +203,7 @@
       const [lastSavedAt, setLastSavedAt] = useState(null);
       const [lastLoadedFingerprint, setLastLoadedFingerprint] = useState('');
       const cloudLoadInFlight = useRef(false);
+      const pendingSaveRef = useRef(null); // 직전 저장 시도 시각 (검증 실패 시 교착 자동복구용)
       const currentDataFingerprint = useMemo(() => getDataFingerprint(accountsData, blocks), [accountsData, blocks]);
       const hasUnsavedChanges = !!lastLoadedFingerprint && currentDataFingerprint !== lastLoadedFingerprint;
       const hasOpenEditor = modal.isOpen || splitModal.isOpen || closeMonthModal.isOpen || settingsModal.isOpen || colorModal.isOpen;
@@ -223,7 +224,10 @@
         if (!res.ok) throw new Error(`클라우드 읽기 실패: HTTP ${res.status}`);
         const text = await res.text();
         try { return JSON.parse(text); }
-        catch (e) { throw new Error("구글 스크립트에서 데이터를 읽지 못했습니다."); }
+        catch (e) {
+          if (/<html/i.test(text)) throw new Error("구글 스크립트가 데이터 대신 로그인 페이지(HTML)를 반환했습니다.\n앱스 스크립트를 [새 배포] → 액세스 권한 '모든 사용자'로 다시 배포하고, 새 /exec URL을 GAS_URL에 넣어주세요.");
+          throw new Error("구글 스크립트에서 데이터를 읽지 못했습니다. (응답이 JSON 형식이 아님)");
+        }
       };
       const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
       const isEmbeddedMobileBrowser = () => /KAKAOTALK|NAVER|DAUMAPPS|FBAN|FBAV|INSTAGRAM|LINE\/|;\s*wv\)/i.test(navigator.userAgent || '');
@@ -282,7 +286,9 @@
         }
         backupCloudSnapshot(data);
         setAccountsData(data.accountsData);
-        const loadedBlocks = cleanupBlocks(data.blocks);
+        // ⚠️ 개선: 불러온 데이터에 자동정리(cleanupBlocks)를 적용하지 않고 서버 원본 그대로 표시
+        //    (불러오는 순간 항목이 합쳐지거나 삭제되어 내용이 꼬이던 원인 제거)
+        const loadedBlocks = Array.isArray(data.blocks) ? data.blocks : [];
         setBlocks(loadedBlocks);
         setCollapsedSubItems(getCollapsibleBlockIds(loadedBlocks));
         setLastLoadedFingerprint(getDataFingerprint(data.accountsData, loadedBlocks));
@@ -416,28 +422,38 @@
         URL.revokeObjectURL(url);
       };
 
-      /* --- 💡 자동 정리(Auto Cleanup) 엔진 (빈 껍데기 박멸) --- */
+      /* --- 💡 자동 정리(Auto Cleanup) 엔진 (구조 보존형으로 개선) --- */
+      // ⚠️ 개선 1: 언랩(승격) 시 하위 항목의 이름이 사라지던 문제 수정 → 이름을 합쳐서 보존
+      // ⚠️ 개선 2: 금액이 0원이어도 이름이 입력된 항목은 삭제하지 않음 (메모/예정 항목 보호)
+      const mergeLabels = (parentLabel, childLabel) => {
+        const p = (parentLabel || '').trim();
+        const c = (childLabel || '').trim();
+        if (!p) return c;
+        if (!c || p === c) return p;
+        return `${p} - ${c}`;
+      };
+      const isEmptyLeaf = (item) => getAmountValue(item) === 0 && !((item && item.label) || '').trim();
       const cleanupBlocks = (blocksArray) => {
-        return blocksArray.map(b => {
+        return (blocksArray || []).map(b => {
           let newSubs = (b.subItems || []).map(s => {
-            let newChildren = (s.childItems || []);
-            // 중분류 알맹이가 1개고 자체금액이 0이면 자동 언랩 (소분류 -> 중분류 승격)
+            let newChildren = (s.childItems || []).filter(c => !isEmptyLeaf(c));
+            // 중분류 알맹이가 1개고 자체금액이 0이면 자동 언랩 (소분류 -> 중분류 승격, 이름 보존)
             if (newChildren.length === 1 && getAmountValue(s) === 0) {
               const singleChild = newChildren[0];
-              return { ...s, label: s.label || singleChild.label, amount: getAmountValue(singleChild), amountColor: singleChild.amountColor, isPlanned: !!(s.isPlanned || singleChild.isPlanned), childItems: [] };
+              return { ...s, label: mergeLabels(s.label, singleChild.label), amount: getAmountValue(singleChild), amountColor: singleChild.amountColor, isPlanned: !!(s.isPlanned || singleChild.isPlanned), childItems: [] };
             }
             return { ...s, childItems: newChildren };
-          }).filter(s => !(s.childItems.length === 0 && getAmountValue(s) === 0));
-          
-          // 대분류 알맹이가 1개고 자체금액이 0이면 자동 언랩 (중분류 -> 대분류 승격)
+          }).filter(s => !(s.childItems.length === 0 && isEmptyLeaf(s)));
+
+          // 대분류 알맹이가 1개고 자체금액이 0이면 자동 언랩 (중분류 -> 대분류 승격, 이름 보존)
           if (newSubs.length === 1 && getAmountValue(b) === 0) {
             const singleSub = newSubs[0];
             if (!singleSub.childItems || singleSub.childItems.length === 0) {
-              return { ...b, label: b.label || singleSub.label, amount: getAmountValue(singleSub), isPlanned: !!singleSub.isPlanned, color: b.color || 'none', subItems: [] };
+              return { ...b, label: mergeLabels(b.label, singleSub.label), amount: getAmountValue(singleSub), isPlanned: !!singleSub.isPlanned, color: b.color || 'none', subItems: [] };
             }
           }
           return { ...b, subItems: newSubs };
-        }).filter(b => !(b.subItems.length === 0 && getAmountValue(b) === 0));
+        }).filter(b => !((b.subItems || []).length === 0 && isEmptyLeaf(b)));
       };
 
       // 다이얼로그 헬퍼
@@ -710,6 +726,17 @@
         }
       };
 
+      // ⚠️ 개선: 저장하지 않은 수정분이 있으면 창을 닫거나 새로고침할 때 경고
+      useEffect(() => {
+        const warnUnsaved = (e) => {
+          if (!hasUnsavedChanges) return;
+          e.preventDefault();
+          e.returnValue = '';
+        };
+        window.addEventListener('beforeunload', warnUnsaved);
+        return () => window.removeEventListener('beforeunload', warnUnsaved);
+      }, [hasUnsavedChanges]);
+
       useEffect(() => {
         const refreshWhenActive = () => {
           if (document.visibilityState !== 'hidden') refreshFromCloud(true);
@@ -741,10 +768,19 @@
           }
 
           const serverSavedAt = latestSnapshot.lastSavedAt || '';
-          const screenSavedAt = lastSavedAt || '';
-          const serverBlocks = cleanupBlocks(latestSnapshot.blocks);
-          const serverFingerprint = getDataFingerprint(latestSnapshot.accountsData, serverBlocks);
-          if (!screenSavedAt || serverSavedAt !== screenSavedAt || (lastLoadedFingerprint && serverFingerprint !== lastLoadedFingerprint)) {
+          let screenSavedAt = lastSavedAt || '';
+          // ⚠️ 개선: 직전에 이 PC에서 저장했는데 확인(검증)만 실패했던 경우,
+          //    서버 시간이 내 저장 시도 시각과 같으면 "내 저장"으로 자동 인식해 교착 상태를 풀어줍니다.
+          let effectiveLoadedFingerprint = lastLoadedFingerprint;
+          if (serverSavedAt && pendingSaveRef.current && serverSavedAt === pendingSaveRef.current) {
+            screenSavedAt = serverSavedAt;
+            setLastSavedAt(serverSavedAt);
+            effectiveLoadedFingerprint = ''; // 지문 비교 생략 (서버 = 내 직전 저장본)
+          }
+          const serverFingerprint = getDataFingerprint(latestSnapshot.accountsData, Array.isArray(latestSnapshot.blocks) ? latestSnapshot.blocks : []);
+          if (!screenSavedAt || serverSavedAt !== screenSavedAt || (effectiveLoadedFingerprint && serverFingerprint !== effectiveLoadedFingerprint)) {
+            // ⚠️ 개선: 안내문 그대로, 충돌 시점에 실제로 로컬 백업을 남깁니다 (기존에는 문구만 있고 백업이 없었음)
+            backupCloudSnapshot(buildCurrentSnapshot(), 'conflict-detected');
             throw new Error(`다른 기기에서 자료가 변경되었습니다.\n현재 수정본은 이 PC에 자동 백업했으며 서버 자료를 덮어쓰지 않았습니다.\n\n최신 불러오기를 눌러 확인해주세요.\n내 화면: ${formatLastSavedAt(screenSavedAt)}\n서버: ${formatLastSavedAt(serverSavedAt)}`);
           }
 
@@ -752,6 +788,7 @@
           const payload = buildCurrentSnapshot(savedAt);
           const body = JSON.stringify(payload);
           backupCloudSnapshot(payload, 'before-save');
+          pendingSaveRef.current = savedAt; // 저장 시도 기록 (검증 실패해도 유지 → 다음 시도에서 자동 복구)
 
           let transferError = null;
           try {
@@ -789,16 +826,17 @@
               : '확인 불가';
             const browserHint = isEmbeddedMobileBrowser()
               ? '\n\n카카오톡 등 앱 내부 브라우저가 구글 저장 요청을 차단했습니다. 오른쪽 위 메뉴에서 이 링크를 삼성 인터넷 또는 크롬으로 열어 저장해주세요.'
-              : '\n\n인터넷 연결을 확인한 뒤 다시 저장해주세요.';
+              : '\n\n인터넷 연결을 확인한 뒤 [클라우드 저장]을 한 번 더 눌러주세요. 실제로 저장이 완료된 경우 자동으로 이어서 처리됩니다.';
             const detail = transferError || verification.error;
             throw new Error(`서버 저장이 확인되지 않았습니다.\n현재 서버: ${serverTime}${detail ? `\n연결 원인: ${detail.message || detail}` : ''}${browserHint}`);
           }
 
           const savedSnapshot = verification.snapshot;
-          const savedBlocks = cleanupBlocks(savedSnapshot.blocks);
+          const savedBlocks = Array.isArray(savedSnapshot.blocks) ? savedSnapshot.blocks : [];
           backupCloudSnapshot(savedSnapshot, 'after-save');
           setLastLoadedFingerprint(getDataFingerprint(savedSnapshot.accountsData, savedBlocks));
           setLastSavedAt(savedAt);
+          pendingSaveRef.current = null;
           openDialog('alert', "클라우드에 저장되었습니다.");
         } catch (err) {
           console.error('Cloud sync failed:', err);
