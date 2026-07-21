@@ -67,12 +67,15 @@
     };
 
     const COLOR_TAGS = {
-      none: { bg: 'bg-white', border: 'border-[#DFD8CE]' },
-      wood: { bg: 'bg-[#F7EFE6]', border: 'border-[#8B5A2B]' }, 
-      sand: { bg: 'bg-[#FDF6E9]', border: 'border-[#D2B48C]' },
-      forest: { bg: 'bg-[#EBF5EC]', border: 'border-[#4A5D23]' },
-      clay: { bg: 'bg-[#FDECE8]', border: 'border-[#C16644]' },
-      stone: { bg: 'bg-[#F5F5F5]', border: 'border-[#7A7873]' },
+      none: { label: '기본', bg: 'bg-white', border: 'border-[#CFC8BE]' },
+      wood: { label: '우드', bg: 'bg-[#F7EFE6]', border: 'border-[#8B5A2B]' },
+      sand: { label: '노랑', bg: 'bg-[#FFF7D6]', border: 'border-[#D79B00]' },
+      forest: { label: '초록', bg: 'bg-[#E8F5E9]', border: 'border-[#2E7D32]' },
+      clay: { label: '빨강', bg: 'bg-[#FDECEC]', border: 'border-[#C62828]' },
+      stone: { label: '회색', bg: 'bg-[#ECEFF1]', border: 'border-[#546E7A]' },
+      sky: { label: '파랑', bg: 'bg-[#E8F2FC]', border: 'border-[#0277BD]' },
+      violet: { label: '보라', bg: 'bg-[#F2EAF8]', border: 'border-[#7B1FA2]' },
+      mint: { label: '민트', bg: 'bg-[#E4F6F2]', border: 'border-[#00897B]' },
     };
 
     const SUBITEM_AMOUNT_COLORS = {
@@ -124,6 +127,14 @@
       },
     };
     const SUMMARY_METRIC_ORDER = ['income', 'expense', 'credit', 'balance'];
+    const REPORT_SUMMARY_ITEMS = [
+      { key: 'income', label: '총 입금', icon: 'ph-arrow-circle-down', text: 'text-[#2E7D32]', bg: 'bg-[#F1F8E9]' },
+      { key: 'expense', label: '총 지출', icon: 'ph-arrow-circle-up', text: 'text-[#C62828]', bg: 'bg-[#FFEBEE]' },
+      { key: 'credit', label: '외상금액', icon: 'ph-clock', text: 'text-[#8B5A2B]', bg: 'bg-[#FDF6E9]' },
+      { key: 'calculatedVat', label: '현재 부가세', icon: 'ph-percent', text: 'text-[#0277BD]', bg: 'bg-[#E8F2FC]' },
+      { key: 'reportedVat', label: '실제 신고액', icon: 'ph-receipt', text: 'text-[#7B1FA2]', bg: 'bg-[#F2EAF8]' },
+      { key: 'balance', label: '결산 잔고', icon: 'ph-wallet', text: 'text-[#455A64]', bg: 'bg-[#ECEFF1]' },
+    ];
 
     function HwarimLogo() {
       return (
@@ -193,12 +204,15 @@
       const [selectedBlocks, setSelectedBlocks] = useState([]);
       const [selectedSummaryCards, setSelectedSummaryCards] = useState([]);
       const [collapsedSubItems, setCollapsedSubItems] = useState([]);
+      const [expandedVatAccounts, setExpandedVatAccounts] = useState([]);
+      const [horizontalScroll, setHorizontalScroll] = useState({ value: 0, max: 0 });
       
       const [modal, setModal] = useState({ isOpen: false, mode: 'create', blockData: null, amountInput: '' });
       const [splitModal, setSplitModal] = useState({ isOpen: false, targetType: null, blockId: null, subItemId: null, childId: null, sourceAmount: 0, amountInput: '', label: '' });
-      const [reportModal, setReportModal] = useState({ isOpen: false, accountId: null });
+      const [reportModal, setReportModal] = useState({ isOpen: false, accountId: null, viewMode: 'monthly' });
       const [closeMonthModal, setCloseMonthModal] = useState({ isOpen: false, accountId: null, monthLabel: '' });
       const [settingsModal, setSettingsModal] = useState({ isOpen: false, accountData: null });
+      const [newAccountModal, setNewAccountModal] = useState({ isOpen: false, name: '', sourceAccountId: '', selectedBlockIds: [] });
       const [contextMenu, setContextMenu] = useState({ isOpen: false, x: 0, y: 0, target: null });
       const [colorModal, setColorModal] = useState({ isOpen: false, target: null, currentColor: 'none' });
       const [dialog, setDialog] = useState({ isOpen: false, type: '', message: '', defaultValue: '', onConfirm: null });
@@ -210,9 +224,10 @@
       const [lastLoadedFingerprint, setLastLoadedFingerprint] = useState('');
       const cloudLoadInFlight = useRef(false);
       const pendingSaveRef = useRef(readPendingSave());
+      const boardScrollRef = useRef(null);
       const currentDataFingerprint = useMemo(() => getDataFingerprint(accountsData, blocks), [accountsData, blocks]);
       const hasUnsavedChanges = !!lastLoadedFingerprint && currentDataFingerprint !== lastLoadedFingerprint;
-      const hasOpenEditor = modal.isOpen || splitModal.isOpen || closeMonthModal.isOpen || settingsModal.isOpen || colorModal.isOpen;
+      const hasOpenEditor = modal.isOpen || splitModal.isOpen || closeMonthModal.isOpen || settingsModal.isOpen || newAccountModal.isOpen || colorModal.isOpen || reportModal.isOpen;
       const rememberPendingSave = (pending) => {
         pendingSaveRef.current = pending;
         try { localStorage.setItem(PENDING_SAVE_KEY, JSON.stringify(pending)); }
@@ -416,6 +431,83 @@
       const getCollapsibleBlockIds = (targetBlocks) => targetBlocks.filter(block => block.subItems && block.subItems.length > 0).map(block => block.id);
       const getVatReports = (account) => Array.isArray(account?.vatReports) ? account.vatReports.filter(item => item && (item.date || item.amount)) : [];
       const parseMoneyInput = (value) => parseInt(String(value || '').replace(/[^0-9-]/g, ''), 10) || 0;
+      const calculateIncludedVat = (amount) => {
+        const numericAmount = Number(amount) || 0;
+        return Math.sign(numericAmount) * Math.round(Math.abs(numericAmount) / 11);
+      };
+      const collectVatEntries = (targetBlocks) => {
+        const entries = [];
+        const visit = (item, level, path) => {
+          if (!item) return;
+          const amount = level === 'block' ? getBlockAmount(item) : getAmountValue(item);
+          const nextPath = [...path, item.label || '이름 없음'];
+          if (item.isVat) {
+            entries.push({ id: item.id, level, label: nextPath.join(' > '), grossAmount: amount, vatAmount: calculateIncludedVat(amount) });
+            return;
+          }
+          if (level === 'block') (item.subItems || []).forEach(sub => visit(sub, 'sub', nextPath));
+          if (level === 'sub') getChildItems(item).forEach(child => visit(child, 'child', nextPath));
+        };
+        (targetBlocks || []).forEach(block => visit(block, 'block', []));
+        return entries;
+      };
+      const getCalculatedVatTotal = (targetBlocks) => collectVatEntries(targetBlocks).reduce((sum, entry) => sum + entry.vatAmount, 0);
+      const getReportedVatTotal = (account) => getVatReports(account).reduce((sum, item) => sum + parseMoneyInput(item.amount), 0);
+      const getReportPeriod = (report) => {
+        if (report?.periodKey && /^\d{4}-\d{2}$/.test(report.periodKey)) {
+          const [year, month] = report.periodKey.split('-').map(Number);
+          return { year, month, quarter: Math.floor((month - 1) / 3) + 1, key: report.periodKey };
+        }
+        const match = String(report?.month || '').match(/(20\d{2})\D+(\d{1,2})/);
+        if (!match) return null;
+        const year = Number(match[1]);
+        const month = Number(match[2]);
+        if (month < 1 || month > 12) return null;
+        return { year, month, quarter: Math.floor((month - 1) / 3) + 1, key: `${year}-${String(month).padStart(2, '0')}` };
+      };
+      const getReportedVatForPeriod = (account, period) => {
+        if (!period) return getReportedVatTotal(account);
+        return getVatReports(account).reduce((sum, item) => {
+          const match = String(item.date || '').match(/^(\d{4})-(\d{2})/);
+          return match && Number(match[1]) === period.year && Number(match[2]) === period.month ? sum + parseMoneyInput(item.amount) : sum;
+        }, 0);
+      };
+      const getReportSummary = (account, report) => {
+        const reportBlocks = Array.isArray(report?.blocks) ? report.blocks : [];
+        const totals = getTotalsForBlocks(reportBlocks);
+        const savedSummary = report?.summary || {};
+        const period = getReportPeriod(report);
+        return {
+          income: Number(totals.income) || 0,
+          expense: Number(totals.expense) || 0,
+          credit: Number(totals.credit) || 0,
+          balance: Number(totals.balance) || 0,
+          calculatedVat: Number(getCalculatedVatTotal(reportBlocks)) || 0,
+          reportedVat: Number(savedSummary.reportedVat ?? getReportedVatForPeriod(account, period)) || 0,
+          blockCount: reportBlocks.length,
+        };
+      };
+      const buildQuarterlyReports = (account, reports) => {
+        const grouped = new Map();
+        (reports || []).forEach(report => {
+          const period = getReportPeriod(report);
+          if (!period) return;
+          const key = `${period.year}-Q${period.quarter}`;
+          if (!grouped.has(key)) grouped.set(key, { key, year: period.year, quarter: period.quarter, reports: [] });
+          grouped.get(key).reports.push(report);
+        });
+        return Array.from(grouped.values()).map(group => {
+          group.reports.sort((a, b) => (getReportPeriod(a)?.month || 0) - (getReportPeriod(b)?.month || 0));
+          group.summary = group.reports.reduce((acc, report) => {
+            const summary = getReportSummary(account, report);
+            Object.keys(acc).forEach(key => { acc[key] += Number(summary[key]) || 0; });
+            return acc;
+          }, { income: 0, expense: 0, credit: 0, balance: 0, calculatedVat: 0, reportedVat: 0, blockCount: 0 });
+          const finalMonth = group.reports[group.reports.length - 1];
+          group.summary.balance = finalMonth ? getReportSummary(account, finalMonth).balance : 0;
+          return group;
+        }).sort((a, b) => b.year - a.year || b.quarter - a.quarter);
+      };
       const sanitizeFileName = (value) => String(value || 'report').replace(/[\\/:*?"<>|]/g, '_');
       const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
@@ -423,11 +515,11 @@
         const rows = [];
         blocksForReport.forEach(block => {
           const blockAmount = getBlockAmount(block);
-          rows.push({ level: '대분류', label: block.label, amount: blockAmount, status: block.isPlanned ? '외상' : '' });
+          rows.push({ level: '대분류', label: block.label, amount: blockAmount, status: [block.isPlanned ? '외상' : '', block.isVat ? `부가세 ${formatCurrency(calculateIncludedVat(blockAmount))}` : ''].filter(Boolean).join(' / ') });
           (block.subItems || []).forEach(sub => {
-            rows.push({ level: '중분류', label: sub.label, amount: getSubItemAmount(sub), status: sub.isPlanned ? '외상' : '' });
+            rows.push({ level: '중분류', label: sub.label, amount: getSubItemAmount(sub), status: [sub.isPlanned ? '외상' : '', sub.isVat ? `부가세 ${formatCurrency(calculateIncludedVat(getSubItemAmount(sub)))}` : ''].filter(Boolean).join(' / ') });
             getChildItems(sub).forEach(child => {
-              rows.push({ level: '소분류', label: child.label, amount: getAmountValue(child), status: child.isPlanned ? '외상' : '' });
+              rows.push({ level: '소분류', label: child.label, amount: getAmountValue(child), status: [child.isPlanned ? '외상' : '', child.isVat ? `부가세 ${formatCurrency(calculateIncludedVat(getAmountValue(child)))}` : ''].filter(Boolean).join(' / ') });
             });
           });
         });
@@ -436,7 +528,7 @@
 
       const downloadReportAsExcel = (account, report) => {
         const rows = collectReportRows(report.blocks || []);
-        const total = (report.blocks || []).reduce((sum, block) => sum + getEffectiveAmount(block), 0);
+        const summary = getReportSummary(account, report);
         const tableRows = rows.map(row => `
           <tr>
             <td>${escapeHtml(row.level)}</td>
@@ -451,7 +543,12 @@
             <body>
               <table border="1">
                 <tr><th colspan="4">${escapeHtml(account.name)} ${escapeHtml(report.month)} 결산서</th></tr>
-                <tr><td>최종 결산액</td><td colspan="3" style="mso-number-format:'\\#\\,\\#\\#0'; text-align:right;">${total}</td></tr>
+                <tr><td>총 입금금액</td><td colspan="3" style="mso-number-format:'\\#\\,\\#\\#0'; text-align:right;">${summary.income}</td></tr>
+                <tr><td>총 지출금액</td><td colspan="3" style="mso-number-format:'\\#\\,\\#\\#0'; text-align:right;">${summary.expense}</td></tr>
+                <tr><td>외상금액</td><td colspan="3" style="mso-number-format:'\\#\\,\\#\\#0'; text-align:right;">${summary.credit}</td></tr>
+                <tr><td>현재 부가세 계산액</td><td colspan="3" style="mso-number-format:'\\#\\,\\#\\#0'; text-align:right;">${summary.calculatedVat}</td></tr>
+                <tr><td>실제 부가세 신고액</td><td colspan="3" style="mso-number-format:'\\#\\,\\#\\#0'; text-align:right;">${summary.reportedVat}</td></tr>
+                <tr><td>최종 결산액</td><td colspan="3" style="mso-number-format:'\\#\\,\\#\\#0'; text-align:right;">${summary.balance}</td></tr>
                 <tr><th>구분</th><th>내역</th><th>금액</th><th>상태</th></tr>
                 ${tableRows}
               </table>
@@ -487,7 +584,7 @@
             // 중분류 알맹이가 1개고 자체금액이 0이면 자동 언랩 (소분류 -> 중분류 승격, 이름 보존)
             if (newChildren.length === 1 && getAmountValue(s) === 0) {
               const singleChild = newChildren[0];
-              return { ...s, label: mergeLabels(s.label, singleChild.label), amount: getAmountValue(singleChild), amountColor: singleChild.amountColor, isPlanned: !!(s.isPlanned || singleChild.isPlanned), childItems: [] };
+              return { ...s, label: mergeLabels(s.label, singleChild.label), amount: getAmountValue(singleChild), amountColor: singleChild.amountColor, isPlanned: !!(s.isPlanned || singleChild.isPlanned), isVat: !!(s.isVat || singleChild.isVat), childItems: [] };
             }
             return { ...s, childItems: newChildren };
           }).filter(s => !(s.childItems.length === 0 && isEmptyLeaf(s)));
@@ -496,7 +593,7 @@
           if (newSubs.length === 1 && getAmountValue(b) === 0) {
             const singleSub = newSubs[0];
             if (!singleSub.childItems || singleSub.childItems.length === 0) {
-              return { ...b, label: mergeLabels(b.label, singleSub.label), amount: getAmountValue(singleSub), isPlanned: !!singleSub.isPlanned, color: b.color || 'none', subItems: [] };
+              return { ...b, label: mergeLabels(b.label, singleSub.label), amount: getAmountValue(singleSub), isPlanned: !!singleSub.isPlanned, isVat: !!(b.isVat || singleSub.isVat), color: b.color || 'none', subItems: [] };
             }
           }
           return { ...b, subItems: newSubs };
@@ -602,15 +699,15 @@
         const uAmt = getUniversalAmount(item);
         const hasSubs = (item.subItems && item.subItems.length > 0) || (item.childItems && item.childItems.length > 0);
         const validColor = COLOR_TAGS[item.color] ? item.color : (COLOR_TAGS[item.amountColor] ? item.amountColor : 'none');
-        return { id: createId('b'), accountId, label: item.label || '새 항목', amount: hasSubs ? 0 : uAmt, color: validColor, isPlanned: !!item.isPlanned, subItems: item.subItems || item.childItems || [] };
+        return { id: createId('b'), accountId, label: item.label || '새 항목', amount: hasSubs ? 0 : uAmt, color: validColor, isPlanned: !!item.isPlanned, isVat: !!item.isVat, subItems: item.subItems || item.childItems || [] };
       };
       const toSub = (item) => {
         const validColor = SUBITEM_AMOUNT_COLORS[item.amountColor] ? item.amountColor : (SUBITEM_AMOUNT_COLORS[item.color] ? item.color : 'auto');
-        return { id: createId('s'), label: item.label || '새 항목', amount: getUniversalAmount(item), amountColor: validColor, isPlanned: !!item.isPlanned, childItems: item.childItems || item.subItems || [] };
+        return { id: createId('s'), label: item.label || '새 항목', amount: getUniversalAmount(item), amountColor: validColor, isPlanned: !!item.isPlanned, isVat: !!item.isVat, childItems: item.childItems || item.subItems || [] };
       };
       const toChild = (item) => {
         const validColor = SUBITEM_AMOUNT_COLORS[item.amountColor] ? item.amountColor : (SUBITEM_AMOUNT_COLORS[item.color] ? item.color : 'auto');
-        return { id: createId('c'), label: item.label || '새 항목', amount: getUniversalAmount(item), amountColor: validColor, isPlanned: !!item.isPlanned };
+        return { id: createId('c'), label: item.label || '새 항목', amount: getUniversalAmount(item), amountColor: validColor, isPlanned: !!item.isPlanned, isVat: !!item.isVat };
       };
 
       const getSelectionKey = (type, id) => `${type}:${id}`;
@@ -800,6 +897,32 @@
         };
       }, [isInitialLoading, isSyncing, hasUnsavedChanges, hasOpenEditor, lastSavedAt]);
 
+      const updateHorizontalScroll = () => {
+        const node = boardScrollRef.current;
+        if (!node) return;
+        setHorizontalScroll({ value: node.scrollLeft, max: Math.max(0, node.scrollWidth - node.clientWidth) });
+      };
+      const scrollBoardTo = (value) => {
+        const node = boardScrollRef.current;
+        if (!node) return;
+        node.scrollLeft = Number(value) || 0;
+        updateHorizontalScroll();
+      };
+      const scrollBoardBy = (direction) => {
+        const node = boardScrollRef.current;
+        if (!node) return;
+        node.scrollBy({ left: direction * Math.max(280, node.clientWidth * 0.8), behavior: 'smooth' });
+        setTimeout(updateHorizontalScroll, 350);
+      };
+      useEffect(() => {
+        const timer = setTimeout(updateHorizontalScroll, 50);
+        window.addEventListener('resize', updateHorizontalScroll);
+        return () => {
+          clearTimeout(timer);
+          window.removeEventListener('resize', updateHorizontalScroll);
+        };
+      }, [accountsData.length, isInitialLoading]);
+
       const syncToCloud = async () => {
         if (!GAS_URL || GAS_URL.includes("여기에")) return openDialog('alert', "구글 스크립트 웹앱 URL이 입력되지 않았습니다!");
         if (isInitialLoading || cloudLoadInFlight.current) return;
@@ -915,7 +1038,7 @@
         const handleWheel = (e) => {
           if (!isDragging) return;
           if (modal.isOpen) { const ms = document.querySelector('.custom-scrollbar'); if (ms) ms.scrollTop += e.deltaY; } 
-          else { const hc = document.querySelector('.overflow-x-auto'); if (hc && (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY))) hc.scrollLeft += (e.deltaX || e.deltaY); else window.scrollBy({ top: e.deltaY, left: 0 }); }
+          else { const hc = boardScrollRef.current; if (hc && (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY))) hc.scrollLeft += (e.deltaX || e.deltaY); else window.scrollBy({ top: e.deltaY, left: 0 }); }
         };
         const handleDragOverEdge = (e) => {
           if (!isDragging) return; lastX = e.clientX; lastY = e.clientY;
@@ -926,7 +1049,7 @@
               if (lastX < 80) sx = -20; else if (window.innerWidth - lastX < 80) sx = 20;
               if (sx === 0 && sy === 0) return;
               if (modal.isOpen) { const ms = document.querySelector('.custom-scrollbar'); if (ms) ms.scrollTop += sy; } 
-              else { window.scrollBy(0, sy); const hc = document.querySelector('.overflow-x-auto'); if (hc && sx !== 0) hc.scrollLeft += sx; }
+              else { window.scrollBy(0, sy); const hc = boardScrollRef.current; if (hc && sx !== 0) hc.scrollLeft += sx; }
             }, 16);
           }
         };
@@ -993,6 +1116,12 @@
       const handleContextMenuCredit = () => {
         const { type, block, subItem, childItem } = contextMenu.target;
         updateTargetItem(type, block.id, subItem?.id, childItem?.id, (item) => ({ ...item, isPlanned: !item.isPlanned }));
+        closeContextMenu();
+      };
+
+      const handleContextMenuVat = () => {
+        const { type, block, subItem, childItem } = contextMenu.target;
+        updateTargetItem(type, block.id, subItem?.id, childItem?.id, (item) => ({ ...item, isVat: !item.isVat }));
         closeContextMenu();
       };
 
@@ -1080,7 +1209,7 @@
                  }
                  if (extracted.subItems && extracted.subItems.length > 0) newSubs.push(...extracted.subItems.map(i => ({...i, id: createId('s')})));
                  else newSubs.push(toSub(extracted));
-                 return { ...b, label: newLabel, amount: 0, isPlanned: !!(b.isPlanned || extracted.isPlanned), subItems: newSubs }; // 부모 금액은 0으로 지우고 하위에서 계산
+                  return { ...b, label: newLabel, amount: 0, isPlanned: !!(b.isPlanned || extracted.isPlanned), isVat: !!(b.isVat || extracted.isVat), subItems: newSubs }; // 부모 금액은 0으로 지우고 하위에서 계산
               }
               let newSubs = (b.subItems || []).map(s => {
                 if (targetType === 'sub' && s.id === targetId) {
@@ -1093,7 +1222,7 @@
                    
                    // 중분류끼리 합칠 때는 순수하게 자체 금액만 더합니다.
                    const mergedAmount = getAmountValue(s) + extAmount;
-                   return { ...s, label: newLabel, amount: mergedAmount, isPlanned: !!(s.isPlanned || extracted.isPlanned), childItems: newChildren };
+                   return { ...s, label: newLabel, amount: mergedAmount, isPlanned: !!(s.isPlanned || extracted.isPlanned), isVat: !!(s.isVat || extracted.isVat), childItems: newChildren };
                 }
                 return s;
               });
@@ -1171,7 +1300,7 @@
           if (splitModal.targetType === 'block') {
             newBlocks = newBlocks.map(b => b.id === splitModal.blockId ? { ...b, amount: b.amount - splitVal } : b);
             const sourceBlock = prev.find(b => b.id === splitModal.blockId); const targetIndex = newBlocks.findIndex(b => b.id === splitModal.blockId);
-            newBlocks.splice(targetIndex + 1, 0, { id: createId('b_split'), accountId: sourceBlock.accountId, label: `${sourceBlock.label} (분리)`, amount: splitVal, color: sourceBlock.color, isPlanned: !!sourceBlock.isPlanned, subItems: [] });
+            newBlocks.splice(targetIndex + 1, 0, { id: createId('b_split'), accountId: sourceBlock.accountId, label: `${sourceBlock.label} (분리)`, amount: splitVal, color: sourceBlock.color, isPlanned: !!sourceBlock.isPlanned, isVat: !!sourceBlock.isVat, subItems: [] });
           }
           else if (splitModal.targetType === 'sub') {
             newBlocks = newBlocks.map(b => {
@@ -1179,7 +1308,7 @@
               const newSubs = [...(b.subItems || [])]; const sIdx = newSubs.findIndex(s => s.id === splitModal.subItemId);
               if(sIdx > -1) {
                 const sourceSub = newSubs[sIdx]; newSubs[sIdx] = { ...sourceSub, amount: sourceSub.amount - splitVal };
-                newSubs.splice(sIdx + 1, 0, { id: createId('s_split'), label: `${sourceSub.label} (분리)`, amount: splitVal, amountColor: sourceSub.amountColor, isPlanned: !!sourceSub.isPlanned, childItems: [] });
+                newSubs.splice(sIdx + 1, 0, { id: createId('s_split'), label: `${sourceSub.label} (분리)`, amount: splitVal, amountColor: sourceSub.amountColor, isPlanned: !!sourceSub.isPlanned, isVat: !!sourceSub.isVat, childItems: [] });
               } return { ...b, subItems: newSubs };
             });
           }
@@ -1191,7 +1320,7 @@
                 const newChildren = [...(s.childItems || [])]; const cIdx = newChildren.findIndex(c => c.id === splitModal.childId);
                 if (cIdx > -1) {
                   const sourceChild = newChildren[cIdx]; newChildren[cIdx] = { ...sourceChild, amount: sourceChild.amount - splitVal };
-                  newChildren.splice(cIdx + 1, 0, { id: createId('c_split'), label: `${sourceChild.label} (분리)`, amount: splitVal, amountColor: sourceChild.amountColor, isPlanned: !!sourceChild.isPlanned });
+                  newChildren.splice(cIdx + 1, 0, { id: createId('c_split'), label: `${sourceChild.label} (분리)`, amount: splitVal, amountColor: sourceChild.amountColor, isPlanned: !!sourceChild.isPlanned, isVat: !!sourceChild.isVat });
                 } return { ...s, childItems: newChildren };
               }); return { ...b, subItems: newSubs };
             });
@@ -1213,19 +1342,54 @@
       const handleBgClick = (e) => { closeContextMenu(); if (e && e.target && !e.target.closest('.selectable-item') && !e.target.closest('.selection-bar')) setSelectedBlocks([]); };
 
       /* --- 그 외 모달 관련 함수들 --- */
+      const cloneBlockForAccount = (sourceBlock, accountId, idPrefix = 'b_copy') => ({
+        ...sourceBlock,
+        id: createId(idPrefix),
+        accountId,
+        subItems: (sourceBlock.subItems || []).map(sub => ({
+          ...sub,
+          id: createId('s_copy'),
+          childItems: getChildItems(sub).map(child => ({ ...child, id: createId('c_copy') })),
+        })),
+      });
+      const openReportModal = (accountId) => setReportModal({ isOpen: true, accountId, viewMode: 'monthly' });
       const openCloseMonthModal = (accountId) => { const today = new Date(); setCloseMonthModal({ isOpen: true, accountId, monthLabel: `${today.getFullYear()}. ${String(today.getMonth() + 1).padStart(2, '0')}월` }); };
       const executeCloseMonth = (e) => {
         e.preventDefault();
+        const account = accountsData.find(acc => acc.id === closeMonthModal.accountId);
         const accountBlocks = blocks.filter(b => b.accountId === closeMonthModal.accountId);
-        const blocksSnapshot = accountBlocks.map(b => ({ id: createId('snap'), label: b.label, amount: getBlockAmount(b), color: b.color || 'none', isPlanned: !!b.isPlanned, subItems: b.subItems }));
-        setAccountsData(prev => prev.map(acc => acc.id === closeMonthModal.accountId ? { ...acc, reportData: [{ id: createId('rep'), month: closeMonthModal.monthLabel, blocks: blocksSnapshot }, ...(acc.reportData || [])] } : acc));
+        const labelPeriod = getReportPeriod({ month: closeMonthModal.monthLabel });
+        const now = new Date();
+        const period = labelPeriod || { year: now.getFullYear(), month: now.getMonth() + 1, key: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` };
+        const blocksSnapshot = accountBlocks.map(block => cloneBlockForAccount(block, closeMonthModal.accountId, 'snap'));
+        const totals = getTotalsForBlocks(accountBlocks);
+        const report = {
+          id: createId('rep'),
+          month: closeMonthModal.monthLabel,
+          periodKey: period.key,
+          createdAt: new Date().toISOString(),
+          summary: {
+            income: totals.income,
+            expense: totals.expense,
+            credit: totals.credit,
+            balance: totals.balance,
+            calculatedVat: getCalculatedVatTotal(accountBlocks),
+            reportedVat: getReportedVatForPeriod(account, period),
+          },
+          blocks: blocksSnapshot,
+        };
+        setAccountsData(prev => prev.map(acc => {
+          if (acc.id !== closeMonthModal.accountId) return acc;
+          const otherReports = (acc.reportData || []).filter(existing => getReportPeriod(existing)?.key !== period.key);
+          return { ...acc, reportData: [report, ...otherReports] };
+        }));
         setCloseMonthModal({ isOpen: false, accountId: null, monthLabel: '' });
       };
 
       const handleReportBlockChange = (reportId, blockId, field, value) => {
         setAccountsData(prev => prev.map(acc => acc.id === reportModal.accountId ? { ...acc, reportData: acc.reportData.map(rep => rep.id === reportId ? { ...rep, blocks: rep.blocks.map(b => b.id === blockId ? { ...b, [field === 'amount' ? 'amountString' : field]: field === 'amount' ? value.replace(/[^0-9-]/g, '') : value, ...(field==='amount' && {amount: parseInt(value.replace(/[^0-9-]/g, ''), 10) || 0}) } : b) } : rep) } : acc));
       };
-      const addReportBlock = (reportId) => setAccountsData(prev => prev.map(acc => acc.id === reportModal.accountId ? { ...acc, reportData: acc.reportData.map(rep => rep.id === reportId ? { ...rep, blocks: [...rep.blocks, { id: createId('snap'), label: '', amount: 0, amountString: '', color: 'none', isPlanned: false, subItems: [] }] } : rep) } : acc));
+      const addReportBlock = (reportId) => setAccountsData(prev => prev.map(acc => acc.id === reportModal.accountId ? { ...acc, reportData: acc.reportData.map(rep => rep.id === reportId ? { ...rep, blocks: [...rep.blocks, { id: createId('snap'), label: '', amount: 0, amountString: '', color: 'none', isPlanned: false, isVat: false, subItems: [] }] } : rep) } : acc));
       const deleteReportBlock = (reportId, blockId) => setAccountsData(prev => prev.map(acc => acc.id === reportModal.accountId ? { ...acc, reportData: acc.reportData.map(rep => rep.id === reportId ? { ...rep, blocks: rep.blocks.filter(b => b.id !== blockId) } : rep) } : acc));
       const deleteEntireReport = (reportId) => {
         openDialog('confirm', '이 결산월의 모든 내역을 삭제하시겠습니까?', '', () => {
@@ -1233,7 +1397,33 @@
         });
       };
 
-      const addNewAccount = () => setAccountsData([...accountsData, { id: createId('acc'), name: '새로운 현장', bank: '은행명', accountNo: '계좌번호 입력', icon: 'ph-fill ph-hard-hat', theme: 'slate', cardHolder: '이사님', vatReports: [], reportData: [] }]);
+      const addNewAccount = () => setNewAccountModal({ isOpen: true, name: '새로운 현장', sourceAccountId: accountsData[0]?.id || '', selectedBlockIds: [] });
+      const toggleNewAccountBlock = (blockId) => setNewAccountModal(prev => ({
+        ...prev,
+        selectedBlockIds: prev.selectedBlockIds.includes(blockId) ? prev.selectedBlockIds.filter(id => id !== blockId) : [...prev.selectedBlockIds, blockId],
+      }));
+      const executeAddNewAccount = (e) => {
+        e.preventDefault();
+        const accountId = createId('acc');
+        const sourceAccount = accountsData.find(account => account.id === newAccountModal.sourceAccountId);
+        const copiedBlocks = blocks
+          .filter(block => newAccountModal.selectedBlockIds.includes(block.id))
+          .map(block => cloneBlockForAccount(block, accountId));
+        const newAccount = {
+          id: accountId,
+          name: newAccountModal.name.trim() || '새로운 현장',
+          bank: '은행명',
+          accountNo: '계좌번호 입력',
+          icon: 'ph-fill ph-hard-hat',
+          theme: sourceAccount?.theme || 'slate',
+          cardHolder: '이사님',
+          vatReports: [],
+          reportData: [],
+        };
+        setAccountsData(prev => [...prev, newAccount]);
+        if (copiedBlocks.length > 0) setBlocks(prev => [...prev, ...copiedBlocks]);
+        setNewAccountModal({ isOpen: false, name: '', sourceAccountId: '', selectedBlockIds: [] });
+      };
       const openSettingsModal = (account) => setSettingsModal({ isOpen: true, accountData: { ...account, cardHolder: account.cardHolder || DEFAULT_CARD_HOLDERS[account.id] || '', vatReports: Array.from({ length: 4 }, (_, idx) => (account.vatReports && account.vatReports[idx]) || { date: '', amount: '' }) } });
       const updateSettingsVatReport = (index, field, value) => setSettingsModal(prev => {
         const vatReports = Array.from({ length: 4 }, (_, idx) => (prev.accountData.vatReports && prev.accountData.vatReports[idx]) || { date: '', amount: '' });
@@ -1250,9 +1440,9 @@
         setSettingsModal({ isOpen: false, accountData: null });
       };
       
-      const openCreateModal = (accountId) => setModal({ isOpen: true, mode: 'create', amountInput: '', blockData: { id: createId('b_new'), accountId, label: '새 내역', amount: 0, color: 'none', isPlanned: false, subItems: [] } });
+      const openCreateModal = (accountId) => setModal({ isOpen: true, mode: 'create', amountInput: '', blockData: { id: createId('b_new'), accountId, label: '새 내역', amount: 0, color: 'none', isPlanned: false, isVat: false, subItems: [] } });
       const openEditModal = (block) => setModal({ isOpen: true, mode: 'edit', amountInput: block.amount === 0 && block.subItems?.length > 0 ? '' : formatCurrency(block.amount), blockData: { ...block, subItems: block.subItems ? [...block.subItems] : [] } });
-      const closeModals = () => { setModal({ isOpen: false, mode: 'create', blockData: null, amountInput: '' }); setReportModal({ isOpen: false, accountId: null }); };
+      const closeModals = () => { setModal({ isOpen: false, mode: 'create', blockData: null, amountInput: '' }); setReportModal({ isOpen: false, accountId: null, viewMode: 'monthly' }); };
       const toggleBlockPlanned = (blockId) => updateTargetItem('block', blockId, null, null, (item) => setItemPlannedDeep(item, !item.isPlanned));
       const toggleSubItems = (blockId) => setCollapsedSubItems(prev => prev.includes(blockId) ? prev.filter(id => id !== blockId) : [...prev, blockId]);
       
@@ -1266,6 +1456,7 @@
         setModal(prev => ({ ...prev, amountInput: formatCurrency(parseInt(val, 10)), blockData: { ...prev.blockData, amount: parseInt(val, 10) } }));
       };
       const toggleModalPlanned = () => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, isPlanned: !prev.blockData.isPlanned } }));
+      const toggleModalVat = () => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, isVat: !prev.blockData.isVat } }));
       
       const handleSubItemChange = (id, field, value) => setModal(prev => {
         const newSubItems = prev.blockData.subItems.map(item => {
@@ -1274,11 +1465,11 @@
         });
         return { ...prev, blockData: { ...prev.blockData, subItems: newSubItems } };
       });
-      const addSubItem = () => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: [...(prev.blockData.subItems || []), { id: createId('s'), label: '', amount: 0, amountString: '', amountColor: 'auto', isPlanned: false, childItems: [] }] } }));
+      const addSubItem = () => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: [...(prev.blockData.subItems || []), { id: createId('s'), label: '', amount: 0, amountString: '', amountColor: 'auto', isPlanned: false, isVat: false, childItems: [] }] } }));
       const removeSubItem = (id) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.filter(item => item.id !== id) } }));
       const setSubItemColor = (id, colorKey) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === id ? { ...item, amountColor: colorKey } : item) } }));
       
-      const addChildItem = (subItemId) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: [...(item.childItems||[]), { id: createId('c'), label: '', amount: 0, amountString: '', amountColor: 'auto', isPlanned: false }] } : item) } }));
+      const addChildItem = (subItemId) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: [...(item.childItems||[]), { id: createId('c'), label: '', amount: 0, amountString: '', amountColor: 'auto', isPlanned: false, isVat: false }] } : item) } }));
       const handleChildItemChange = (subItemId, childId, field, value) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: item.childItems.map(child => child.id === childId ? { ...child, [field === 'amount' ? 'amountString' : field]: field === 'amount' ? value.replace(/[^0-9-]/g, '') : value, ...(field==='amount' && {amount: parseInt(value.replace(/[^0-9-]/g, ''), 10) || 0}) } : child) } : item) } }));
       const removeChildItem = (subItemId, childId) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: item.childItems.filter(child => child.id !== childId) } : item) } }));
       const setChildItemColor = (subItemId, childId, colorKey) => setModal(prev => ({ ...prev, blockData: { ...prev.blockData, subItems: prev.blockData.subItems.map(item => item.id === subItemId ? { ...item, childItems: item.childItems.map(child => child.id === childId ? { ...child, amountColor: colorKey } : child) } : item) } }));
@@ -1385,9 +1576,10 @@
             const target = contextMenu.target;
             const targetItem = target?.type === 'block' ? target.block : target?.type === 'sub' ? target.subItem : target?.childItem;
             const isCredit = !!targetItem?.isPlanned;
+            const isVat = !!targetItem?.isVat;
             return (
               <div
-                className="context-menu-enter fixed z-[9999] bg-white rounded-xl shadow-2xl border border-[#DFD8CE] py-1.5 w-40 overflow-hidden"
+                className="context-menu-enter fixed z-[9999] bg-white rounded-xl shadow-2xl border border-[#DFD8CE] py-1.5 w-44 overflow-hidden"
                 style={{ top: contextMenu.y, left: contextMenu.x }}
               >
                 <button 
@@ -1407,6 +1599,12 @@
                   className={`w-full text-left px-4 py-2.5 text-[12px] font-bold flex items-center gap-2 transition-colors ${isCredit ? 'text-[#8B5A2B] bg-[#FDF6E9] hover:bg-[#F9F6F0]' : 'text-[#3D2B1F] hover:bg-[#F9F6F0] hover:text-[#8B5A2B]'}`}
                 >
                   <i className="ph-bold ph-clock text-[#A69C8E]"></i> {isCredit ? '외상 해제' : '외상 설정'}
+                </button>
+                <button
+                  onClick={handleContextMenuVat}
+                  className={`w-full text-left px-4 py-2.5 text-[12px] font-bold flex items-center gap-2 transition-colors ${isVat ? 'text-[#0277BD] bg-[#E8F2FC] hover:bg-[#DCEBFA]' : 'text-[#3D2B1F] hover:bg-[#F9F6F0] hover:text-[#0277BD]'}`}
+                >
+                  <i className="ph-bold ph-percent text-[#0277BD]"></i> {isVat ? '부가세 계산 해제' : '부가세 계산'}
                 </button>
                 <div className="h-px bg-[#EFEBE4] my-1"></div>
                 <button 
@@ -1446,7 +1644,7 @@
                           `}
                         >
                           <span className={`w-4 h-4 rounded-full border border-black/10 ${isBlockColor ? `${color.bg} ${color.border}` : color.swatch}`}></span>
-                          {isBlockColor ? colorKey : color.label}
+                          {color.label}
                         </button>
                       );
                     })}
@@ -1520,7 +1718,7 @@
             </div>
           </header>
 
-          <div className="flex-1 overflow-x-auto overflow-y-visible p-6 hide-scrollbar relative">
+          <div ref={boardScrollRef} onScroll={updateHorizontalScroll} className="flex-1 overflow-x-auto overflow-y-visible p-6 hide-scrollbar relative">
             <div className="flex gap-5 items-start min-w-max">
               
               {accountsData.map(account => {
@@ -1528,6 +1726,11 @@
                 const accountTotals = getTotalsForBlocks(accountBlocks);
                 const theme = COLUMN_THEMES[account.theme || 'wood'];
                 const cardHolders = getCardHolders(account);
+                const vatEntries = collectVatEntries(accountBlocks);
+                const calculatedVat = vatEntries.reduce((sum, entry) => sum + entry.vatAmount, 0);
+                const vatReports = getVatReports(account);
+                const reportedVat = getReportedVatTotal(account);
+                const isVatExpanded = expandedVatAccounts.includes(account.id);
 
                 return (
                   <div 
@@ -1555,31 +1758,59 @@
                           </span>
                         ))}
                       </div>
-                      {getVatReports(account).length > 0 && (
-                        <div className="ml-10 mb-1 flex flex-col gap-1 pointer-events-none">
-                          {getVatReports(account).map((vat, idx) => (
-                            <div key={`${vat.date}-${idx}`} className="inline-flex w-fit items-center gap-1.5 rounded-md border border-[#D2B48C] bg-white/80 px-2 py-0.5 text-[10px] font-black text-[#8B5A2B] shadow-sm">
-                              <i className="ph-fill ph-receipt" style={{fontSize: 11}}></i>
-                              <span>부가세 {idx + 1}</span>
-                              {vat.date && <span>{vat.date}</span>}
-                              {vat.amount && <span className="font-mono">{formatCurrency(parseMoneyInput(vat.amount))}</span>}
-                            </div>
-                          ))}
+                      <div className="ml-8 my-2 rounded-lg border border-[#D9DDE3] bg-white/90 shadow-sm overflow-hidden pointer-events-auto">
+                        <div className="grid grid-cols-[1fr_34px_1fr] items-stretch">
+                          <div className="px-2.5 py-2 min-w-0 bg-[#F1F7FD]">
+                            <p className="text-[9px] font-black text-[#0277BD] flex items-center gap-1"><i className="ph-bold ph-percent"></i> 계산 부가세</p>
+                            <p className={`font-mono text-[12px] font-black truncate ${calculatedVat < 0 ? 'text-[#C62828]' : 'text-[#0277BD]'}`}>{formatSignedCurrency(calculatedVat)}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setExpandedVatAccounts(prev => prev.includes(account.id) ? prev.filter(id => id !== account.id) : [...prev, account.id]); }}
+                            className="border-x border-[#E6E0D4] bg-[#FCFAF8] text-[#6D5443] hover:bg-[#EFEBE4] flex items-center justify-center"
+                            title={isVatExpanded ? '부가세 상세 접기' : '부가세 상세 펼치기'}
+                          >
+                            <i className={`ph-bold ph-caret-${isVatExpanded ? 'up' : 'down'}`} style={{fontSize: 14}}></i>
+                          </button>
+                          <div className="px-2.5 py-2 min-w-0 bg-[#FDF7EF] text-right">
+                            <p className="text-[9px] font-black text-[#8B5A2B] flex items-center justify-end gap-1"><i className="ph-fill ph-receipt"></i> 실제 신고액</p>
+                            <p className={`font-mono text-[12px] font-black truncate ${reportedVat < 0 ? 'text-[#C62828]' : 'text-[#8B5A2B]'}`}>{formatSignedCurrency(reportedVat)}</p>
+                          </div>
                         </div>
-                      )}
+                        {isVatExpanded && (
+                          <div className="grid grid-cols-2 border-t border-[#E6E0D4] bg-white text-[9px]">
+                            <div className="p-2 border-r border-[#E6E0D4] space-y-1 min-w-0">
+                              {vatEntries.length > 0 ? vatEntries.map(entry => (
+                                <div key={entry.id} className="flex items-start justify-between gap-1">
+                                  <span className="truncate text-[#4B6070] font-bold" title={entry.label}>{entry.label}</span>
+                                  <span className="font-mono font-black text-[#0277BD] shrink-0">{formatSignedCurrency(entry.vatAmount)}</span>
+                                </div>
+                              )) : <p className="text-[#A69C8E] font-bold">계산 항목 없음</p>}
+                            </div>
+                            <div className="p-2 space-y-1 min-w-0">
+                              {vatReports.length > 0 ? vatReports.map((vat, idx) => (
+                                <div key={`${vat.date}-${idx}`} className="flex items-start justify-between gap-1">
+                                  <span className="truncate text-[#7A5A43] font-bold">{vat.date || `신고 ${idx + 1}`}</span>
+                                  <span className="font-mono font-black text-[#8B5A2B] shrink-0">{formatSignedCurrency(parseMoneyInput(vat.amount))}</span>
+                                </div>
+                              )) : <p className="text-[#A69C8E] font-bold text-right">신고 기록 없음</p>}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#6D5443] ml-10 opacity-80 pointer-events-none">
                         <i className="ph-fill ph-credit-card" style={{fontSize: 12}}></i> {account.bank} | <span className="font-mono">{account.accountNo}</span>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-4 bg-white/60 backdrop-blur-sm border-b border-[#E6E0D4] shrink-0">
-                      <button onClick={() => setReportModal({ isOpen: true, accountId: account.id })} className="py-2.5 flex flex-col items-center justify-center gap-1 hover:bg-[#EFEBE4] border-r border-[#EFEBE4] transition-colors group">
+                      <button onClick={() => openReportModal(account.id)} className="py-2.5 flex flex-col items-center justify-center gap-1 hover:bg-[#EFEBE4] border-r border-[#EFEBE4] transition-colors group">
                         <i className={`ph-fill ph-chart-bar ${theme.text} opacity-70 group-hover:opacity-100 group-hover:-translate-y-0.5 transition-all`} style={{fontSize: 16}}></i>
                         <span className="text-[10px] font-extrabold text-[#6D5443]">결산서</span>
                       </button>
                       <button onClick={() => openCloseMonthModal(account.id)} className="py-2.5 flex flex-col items-center justify-center gap-1 hover:bg-[#EFEBE4] border-r border-[#EFEBE4] transition-colors group">
                         <i className={`ph-fill ph-calendar-check ${theme.text} opacity-70 group-hover:opacity-100 group-hover:-translate-y-0.5 transition-all`} style={{fontSize: 16}}></i>
-                        <span className="text-[10px] font-extrabold text-[#6D5443]">월 마감</span>
+                        <span className="text-[10px] font-extrabold text-[#6D5443]">월 결산</span>
                       </button>
                       <button onClick={() => openCreateModal(account.id)} className="py-2.5 flex flex-col items-center justify-center gap-1 hover:bg-[#EFEBE4] border-r border-[#EFEBE4] transition-colors group">
                         <i className={`ph-fill ph-plus-circle ${theme.text} opacity-70 group-hover:opacity-100 group-hover:-translate-y-0.5 transition-all`} style={{fontSize: 16}}></i>
@@ -1640,6 +1871,7 @@
                                         {block.label}
                                       </p>
                                       {isPlanned && <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">외상</span>}
+                                      {block.isVat && <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#E8F2FC] text-[#0277BD] border border-[#90CAF9]">부가세 {formatSignedCurrency(calculateIncludedVat(blockAmount))}</span>}
                                     </div>
                                     <div className="flex items-center gap-2 pointer-events-auto mt-0.5">
                                       <p className={`font-mono text-[16px] font-black tracking-tight ${getAmountTextClass(blockAmount, 'auto', isPlanned)}`}>
@@ -1722,6 +1954,7 @@
                                                     {subAmount > 0 ? '+' : ''}{formatCurrency(subAmount)}
                                                   </span>
                                                   {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">외상</span>}
+                                                  {sub.isVat && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-[#E8F2FC] text-[#0277BD] border border-[#90CAF9]">부가세 {formatSignedCurrency(calculateIncludedVat(subAmount))}</span>}
                                                 </div>
                                               </div>
                                               
@@ -1761,6 +1994,7 @@
                                                             {child.amount > 0 ? '+' : ''}{formatCurrency(child.amount)}
                                                           </span>
                                                           {child.isPlanned && <span className="text-[9px] font-black px-1 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">외상</span>}
+                                                          {child.isVat && <span className="text-[9px] font-black px-1 py-0.5 rounded-full bg-[#E8F2FC] text-[#0277BD] border border-[#90CAF9]">부가세 {formatSignedCurrency(calculateIncludedVat(child.amount))}</span>}
                                                         </div>
                                                       </div>
                                                     </Fragment>
@@ -1846,6 +2080,22 @@
             </div>
           </div>
 
+          {horizontalScroll.max > 0 && (
+            <div className="fixed left-1/2 bottom-4 -translate-x-1/2 z-40 w-[min(88vw,760px)] h-11 rounded-xl border border-[#D2B48C] bg-white/95 shadow-xl backdrop-blur-md px-2 flex items-center gap-2">
+              <button type="button" onClick={() => scrollBoardBy(-1)} className="w-8 h-8 shrink-0 rounded-lg text-[#6D5443] hover:bg-[#EFEBE4] flex items-center justify-center" title="왼쪽으로 이동"><i className="ph-bold ph-caret-left"></i></button>
+              <input
+                type="range"
+                min="0"
+                max={horizontalScroll.max}
+                value={Math.min(horizontalScroll.value, horizontalScroll.max)}
+                onChange={(e) => scrollBoardTo(e.target.value)}
+                className="flex-1 accent-[#8B5A2B] cursor-ew-resize"
+                aria-label="현장 화면 좌우 이동"
+              />
+              <button type="button" onClick={() => scrollBoardBy(1)} className="w-8 h-8 shrink-0 rounded-lg text-[#6D5443] hover:bg-[#EFEBE4] flex items-center justify-center" title="오른쪽으로 이동"><i className="ph-bold ph-caret-right"></i></button>
+            </div>
+          )}
+
           {/* 3. 다중 선택 계산기 바 */}
           {calculationItems.length > 0 && (
             <div className="selection-bar fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[min(92vw,620px)] rounded-2xl border border-[#D2B48C] bg-[#241913]/95 text-[#FDFCFB] shadow-2xl backdrop-blur-xl p-4 animate-in zoom-in-95">
@@ -1916,6 +2166,58 @@
                   <button type="submit" className="w-full py-3 bg-[#8B5A2B] text-white hover:bg-[#6B4423] rounded-xl text-sm font-extrabold flex items-center justify-center gap-2 transition-colors shadow-md">
                     <i className="ph-bold ph-arrows-split" style={{fontSize: 16}}></i> 나누기 확정
                   </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* --- 모달: 새로운 현장 및 자금박스 복제 --- */}
+          {newAccountModal.isOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#2A1D15]/80 backdrop-blur-sm" onClick={() => setNewAccountModal({ isOpen: false, name: '', sourceAccountId: '', selectedBlockIds: [] })}>
+              <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden border border-[#E6E0D4]" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-5 border-b border-[#E6E0D4] bg-[#FCFAF8]">
+                  <div>
+                    <h3 className="font-black text-[#2A1D15] text-lg flex items-center gap-2"><i className="ph-fill ph-buildings text-[#8B5A2B]"></i> 새로운 현장 추가</h3>
+                    <p className="text-[11px] font-bold text-[#A69C8E] mt-1">기존 현장의 원하는 자금박스를 골라 함께 복제할 수 있습니다.</p>
+                  </div>
+                  <button type="button" onClick={() => setNewAccountModal({ isOpen: false, name: '', sourceAccountId: '', selectedBlockIds: [] })} className="p-2 rounded-full hover:bg-[#EFEBE4] text-[#6D5443]" title="닫기"><i className="ph-bold ph-x"></i></button>
+                </div>
+                <form onSubmit={executeAddNewAccount} className="p-5 space-y-4">
+                  <div>
+                    <label className="block text-xs font-extrabold text-[#6D5443] mb-1.5">새 현장명</label>
+                    <input type="text" required autoFocus value={newAccountModal.name} onChange={(e) => setNewAccountModal(prev => ({ ...prev, name: e.target.value }))} className="w-full border-2 border-[#E6E0D4] rounded-lg p-2.5 text-sm font-bold focus:outline-none focus:border-[#8B5A2B]" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-extrabold text-[#6D5443] mb-1.5">복제할 원본 현장</label>
+                    <select value={newAccountModal.sourceAccountId} onChange={(e) => setNewAccountModal(prev => ({ ...prev, sourceAccountId: e.target.value, selectedBlockIds: [] }))} className="w-full border border-[#DFD8CE] rounded-lg p-2.5 text-sm font-bold bg-white focus:outline-none focus:border-[#8B5A2B]">
+                      {accountsData.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="rounded-lg border border-[#DFD8CE] overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 bg-[#F9F6F0] border-b border-[#DFD8CE]">
+                      <span className="text-xs font-extrabold text-[#6D5443]">복제할 자금박스</span>
+                      <button type="button" onClick={() => {
+                        const sourceIds = blocks.filter(block => block.accountId === newAccountModal.sourceAccountId).map(block => block.id);
+                        setNewAccountModal(prev => ({ ...prev, selectedBlockIds: prev.selectedBlockIds.length === sourceIds.length ? [] : sourceIds }));
+                      }} className="text-[10px] font-black text-[#8B5A2B] hover:underline">전체 선택/해제</button>
+                    </div>
+                    <div className="max-h-56 overflow-y-auto custom-scrollbar p-2 space-y-1.5">
+                      {blocks.filter(block => block.accountId === newAccountModal.sourceAccountId).length > 0 ? blocks.filter(block => block.accountId === newAccountModal.sourceAccountId).map(block => (
+                        <label key={block.id} className={`flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${newAccountModal.selectedBlockIds.includes(block.id) ? 'border-[#8B5A2B] bg-[#F9F6F0]' : 'border-[#E6E0D4] bg-white hover:bg-[#FCFAF8]'}`}>
+                          <input type="checkbox" checked={newAccountModal.selectedBlockIds.includes(block.id)} onChange={() => toggleNewAccountBlock(block.id)} className="accent-[#8B5A2B]" />
+                          <span className="flex-1 min-w-0 truncate text-xs font-extrabold text-[#3D2B1F]">{block.label}</span>
+                          {block.isPlanned && <span className="text-[9px] font-black text-[#8B5A2B]">외상</span>}
+                          {block.isVat && <span className="text-[9px] font-black text-[#0277BD]">부가세</span>}
+                          <span className={`font-mono text-xs font-black ${getAmountTextClass(getBlockAmount(block))}`}>{formatSignedCurrency(getBlockAmount(block))}</span>
+                        </label>
+                      )) : <p className="py-6 text-center text-xs font-bold text-[#A69C8E]">복제할 자금박스가 없습니다.</p>}
+                    </div>
+                  </div>
+                  <p className="text-[10px] font-bold text-[#A69C8E]">선택한 박스는 금액·외상·부가세·색상·하위항목까지 그대로 복제됩니다.</p>
+                  <div className="flex gap-2 pt-1">
+                    <button type="button" onClick={() => setNewAccountModal({ isOpen: false, name: '', sourceAccountId: '', selectedBlockIds: [] })} className="flex-1 py-3 rounded-lg bg-[#EFEBE4] text-[#6D5443] text-sm font-extrabold">취소</button>
+                    <button type="submit" className="flex-[2] py-3 rounded-lg bg-[#8B5A2B] text-white text-sm font-extrabold shadow-md"><i className="ph-bold ph-copy mr-1"></i> 현장 생성</button>
+                  </div>
                 </form>
               </div>
             </div>
@@ -2006,7 +2308,7 @@
             </div>
           )}
 
-          {/* --- 모달: 월 마감 --- */}
+          {/* --- 모달: 월 결산 --- */}
           {closeMonthModal.isOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#2A1D15]/80 backdrop-blur-sm">
               <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 border border-[#E6E0D4]">
@@ -2014,7 +2316,7 @@
                   <div className="w-12 h-12 bg-[#EFEBE4] text-[#8B5A2B] rounded-full flex items-center justify-center mx-auto mb-3">
                     <i className="ph-fill ph-calendar-check" style={{fontSize: 24}}></i>
                   </div>
-                  <h3 className="font-extrabold text-[#3D2B1F] text-lg">월별 결산 확정 (저장)</h3>
+                  <h3 className="font-extrabold text-[#3D2B1F] text-lg">월 결산 확정 (저장)</h3>
                   <p className="text-xs font-bold text-[#A69C8E] mt-1">{(accountsData.find(a => a.id === closeMonthModal.accountId) || {}).name}</p>
                 </div>
                 
@@ -2048,11 +2350,17 @@
                       <i className="ph-fill ph-file-text" style={{fontSize: 20}}></i>
                     </div>
                     <div>
-                      <h3 className="font-black text-[#2A1D15] text-xl tracking-tight">월별 결산 내역서</h3>
+                      <h3 className="font-black text-[#2A1D15] text-xl tracking-tight">월별·분기별 결산 대시보드</h3>
                       <p className="text-xs font-bold text-[#8B5A2B] mt-0.5">{(accountsData.find(a => a.id === reportModal.accountId) || {}).name} 누적 장부</p>
                     </div>
                   </div>
-                  <button onClick={closeModals} className="p-2 bg-[#EFEBE4] hover:bg-[#DFD8CE] rounded-full text-[#6D5443] transition-colors"><i className="ph-bold ph-x" style={{fontSize: 20}}></i></button>
+                  <div className="flex items-center gap-3">
+                    <div className="inline-flex rounded-lg border border-[#D2B48C] bg-[#F9F6F0] p-1">
+                      <button type="button" onClick={() => setReportModal(prev => ({ ...prev, viewMode: 'monthly' }))} className={`px-3 py-1.5 rounded-md text-xs font-extrabold transition-colors ${reportModal.viewMode === 'monthly' ? 'bg-[#8B5A2B] text-white shadow-sm' : 'text-[#6D5443] hover:bg-white'}`}>월별</button>
+                      <button type="button" onClick={() => setReportModal(prev => ({ ...prev, viewMode: 'quarterly' }))} className={`px-3 py-1.5 rounded-md text-xs font-extrabold transition-colors ${reportModal.viewMode === 'quarterly' ? 'bg-[#8B5A2B] text-white shadow-sm' : 'text-[#6D5443] hover:bg-white'}`}>분기별(3개월)</button>
+                    </div>
+                    <button onClick={closeModals} className="p-2 bg-[#EFEBE4] hover:bg-[#DFD8CE] rounded-full text-[#6D5443] transition-colors" title="닫기"><i className="ph-bold ph-x" style={{fontSize: 20}}></i></button>
+                  </div>
                 </div>
 
                 <div className="flex flex-1 overflow-x-auto p-8 gap-6 bg-[#F5F2EC] custom-scrollbar items-start">
@@ -2065,16 +2373,62 @@
                         <div className="w-full h-full flex flex-col items-center justify-center text-[#A69C8E]">
                           <i className="ph-fill ph-chart-bar mb-4 opacity-50" style={{fontSize: 48}}></i>
                           <p className="font-bold text-lg">저장된 결산 기록이 없습니다.</p>
-                          <p className="text-sm mt-2">메인 보드에서 [월 마감]을 통해 결산을 저장해보세요.</p>
+                          <p className="text-sm mt-2">메인 보드에서 [월 결산]을 통해 결산을 저장해보세요.</p>
                         </div>
                       );
                     }
 
+                    if (reportModal.viewMode === 'quarterly') {
+                      const quarterlyReports = buildQuarterlyReports(reportAccount, reports);
+                      if (quarterlyReports.length === 0) {
+                        return <div className="w-full h-full flex items-center justify-center text-sm font-bold text-[#A69C8E]">연도와 월을 확인할 수 있는 결산 기록이 없습니다.</div>;
+                      }
+                      return quarterlyReports.map(group => (
+                        <div key={group.key} className="w-[520px] shrink-0 bg-white border border-[#E6E0D4] rounded-2xl shadow-md overflow-hidden">
+                          <div className="px-5 py-4 bg-[#FCFAF8] border-b border-[#E6E0D4] flex items-center justify-between">
+                            <div>
+                              <p className="text-[10px] font-black text-[#A69C8E] uppercase">3개월 합산 결과</p>
+                              <h2 className="text-2xl font-black text-[#2A1D15]">{group.year}년 {group.quarter}분기</h2>
+                            </div>
+                            <span className="text-xs font-extrabold text-[#8B5A2B]">{group.reports.length}개월</span>
+                          </div>
+                          <div className="grid grid-cols-3 border-b border-[#E6E0D4]">
+                            {REPORT_SUMMARY_ITEMS.map((metric, index) => {
+                              const value = group.summary[metric.key] || 0;
+                              return (
+                                <div key={metric.key} className={`px-3 py-3 ${metric.bg} ${index % 3 !== 2 ? 'border-r border-white' : ''} ${index < 3 ? 'border-b border-white' : ''}`}>
+                                  <p className={`text-[9px] font-black flex items-center gap-1 ${metric.text}`}><i className={`ph-bold ${metric.icon}`}></i>{metric.label}</p>
+                                  <p className={`font-mono text-[13px] font-black truncate ${metric.text}`}>{metric.key === 'expense' ? formatCurrency(Math.abs(value)) : formatSignedCurrency(value)}</p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div className="p-4">
+                            <div className="grid grid-cols-[90px_1fr_1fr_1fr] px-3 py-2 bg-[#F9F6F0] text-[10px] font-black text-[#6D5443] rounded-t-lg">
+                              <span>결산월</span><span className="text-right">입금</span><span className="text-right">지출</span><span className="text-right">부가세/신고</span>
+                            </div>
+                            {group.reports.map(report => {
+                              const summary = getReportSummary(reportAccount, report);
+                              return (
+                                <div key={report.id} className="grid grid-cols-[90px_1fr_1fr_1fr] items-center px-3 py-2.5 border-b border-[#EFEBE4] text-[11px]">
+                                  <span className="font-extrabold text-[#3D2B1F] truncate">{report.month}</span>
+                                  <span className="font-mono font-bold text-right text-[#2E7D32]">{formatSignedCurrency(summary.income)}</span>
+                                  <span className="font-mono font-bold text-right text-[#C62828]">{formatCurrency(summary.expense)}</span>
+                                  <span className="font-mono font-bold text-right text-[#0277BD]">{formatSignedCurrency(summary.calculatedVat)} / <span className="text-[#7B1FA2]">{formatSignedCurrency(summary.reportedVat)}</span></span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ));
+                    }
+
                     return reports.map(activeReport => {
-                      const reportTotal = activeReport.blocks.reduce((sum, b) => sum + getEffectiveAmount(b), 0);
+                      const reportSummary = getReportSummary(reportAccount, activeReport);
+                      const reportTotal = reportSummary.balance;
                       
                       return (
-                        <div key={activeReport.id} className="w-[400px] shrink-0 bg-white border border-[#E6E0D4] rounded-2xl shadow-md flex flex-col max-h-full">
+                        <div key={activeReport.id} className="w-[460px] shrink-0 bg-white border border-[#E6E0D4] rounded-2xl shadow-md flex flex-col max-h-full">
                           <div className="p-5 border-b border-[#E6E0D4] flex justify-between items-end shrink-0 bg-[#FCFAF8] rounded-t-2xl">
                             <h2 className="text-2xl font-black text-[#2A1D15]">{activeReport.month}</h2>
                             <div className="text-right">
@@ -2083,6 +2437,17 @@
                                 {reportTotal > 0 ? '+' : ''}{formatCurrency(reportTotal)}
                               </p>
                             </div>
+                          </div>
+                          <div className="grid grid-cols-3 shrink-0 border-b border-[#E6E0D4]">
+                            {REPORT_SUMMARY_ITEMS.map((metric, index) => {
+                              const value = reportSummary[metric.key] || 0;
+                              return (
+                                <div key={metric.key} className={`px-3 py-2.5 ${metric.bg} ${index % 3 !== 2 ? 'border-r border-white' : ''} ${index < 3 ? 'border-b border-white' : ''}`}>
+                                  <p className={`text-[9px] font-black flex items-center gap-1 ${metric.text}`}><i className={`ph-bold ${metric.icon}`}></i>{metric.label}</p>
+                                  <p className={`font-mono text-[12px] font-black truncate ${metric.text}`}>{metric.key === 'expense' ? formatCurrency(Math.abs(value)) : formatSignedCurrency(value)}</p>
+                                </div>
+                              );
+                            })}
                           </div>
                           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col gap-2">
                             {activeReport.blocks.map(block => {
@@ -2101,6 +2466,7 @@
                                         placeholder="항목/적요명"
                                       />
                                       {isPlanned && <span className="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">외상</span>}
+                                      {block.isVat && <span className="shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-[#E8F2FC] text-[#0277BD] border border-[#90CAF9]">부가세 {formatSignedCurrency(calculateIncludedVat(blockAmount))}</span>}
                                       <input 
                                         type="text" value={hasSubItems ? formatCurrency(blockAmount) : (block.amountString != null ? block.amountString : (block.amount === 0 ? '' : block.amount))}
                                         readOnly={hasSubItems}
@@ -2132,6 +2498,7 @@
                                                     {subAmount > 0 ? '+' : ''}{formatCurrency(subAmount)}
                                                   </span>
                                                   {sub.isPlanned && <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">외상</span>}
+                                                  {sub.isVat && <span className="text-[9px] font-black px-1 py-0.5 rounded-full bg-[#E8F2FC] text-[#0277BD] border border-[#90CAF9]">부가세 {formatSignedCurrency(calculateIncludedVat(subAmount))}</span>}
                                                 </div>
                                               </div>
                                               {childItems.length > 0 && (
@@ -2147,6 +2514,7 @@
                                                           {child.amount > 0 ? '+' : ''}{formatCurrency(child.amount)}
                                                         </span>
                                                         {child.isPlanned && <span className="text-[9px] font-black px-1 py-0.5 rounded-full bg-[#FDF6E9] text-[#8B5A2B] border border-[#D2B48C]">외상</span>}
+                                                        {child.isVat && <span className="text-[9px] font-black px-1 py-0.5 rounded-full bg-[#E8F2FC] text-[#0277BD] border border-[#90CAF9]">부가세 {formatSignedCurrency(calculateIncludedVat(child.amount))}</span>}
                                                       </div>
                                                     </div>
                                                   ))}
@@ -2219,9 +2587,9 @@
 
                   <div className="mb-6">
                     <label className="block text-xs font-extrabold text-[#6D5443] mb-2 uppercase">박스 컬러 지정 (전체 배경색)</label>
-                    <div className="flex gap-3">
+                    <div className="flex flex-wrap gap-3">
                       {Object.keys(COLOR_TAGS).map(key => (
-                        <button key={key} type="button" onClick={() => setModal(p => ({...p, blockData: {...p.blockData, color: key}}))} className={`w-8 h-8 rounded-full border-2 transition-all shadow-sm ${COLOR_TAGS[key].bg} ${COLOR_TAGS[key].border} ${modal.blockData.color === key ? 'ring-2 ring-offset-2 ring-[#8B5A2B] scale-110' : 'hover:scale-105'}`}/>
+                        <button key={key} type="button" title={COLOR_TAGS[key].label} onClick={() => setModal(p => ({...p, blockData: {...p.blockData, color: key}}))} className={`w-8 h-8 rounded-full border-2 transition-all shadow-sm ${COLOR_TAGS[key].bg} ${COLOR_TAGS[key].border} ${modal.blockData.color === key ? 'ring-2 ring-offset-2 ring-[#8B5A2B] scale-110' : 'hover:scale-105'}`}/>
                       ))}
                     </div>
                   </div>
@@ -2241,6 +2609,21 @@
                       </span>
                       <span className={`text-[10px] px-2 py-1 rounded-full ${modal.blockData.isPlanned ? 'bg-[#8B5A2B] text-white' : 'bg-[#EFEBE4] text-[#A69C8E]'}`}>
                         {modal.blockData.isPlanned ? '켜짐' : '꺼짐'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={toggleModalVat}
+                      className={`w-full mt-2 rounded-xl border-2 p-3 flex items-center justify-between gap-3 text-sm font-extrabold transition-colors
+                        ${modal.blockData.isVat ? 'bg-[#E8F2FC] border-[#90CAF9] text-[#0277BD]' : 'bg-white border-[#E6E0D4] text-[#6D5443] hover:border-[#90CAF9]'}
+                      `}
+                    >
+                      <span className="flex items-center gap-2">
+                        <i className="ph-bold ph-percent" style={{fontSize: 16}}></i>
+                        부가세 자동계산 · 공급대가의 1/11
+                      </span>
+                      <span className={`text-[10px] px-2 py-1 rounded-full ${modal.blockData.isVat ? 'bg-[#0277BD] text-white' : 'bg-[#EFEBE4] text-[#A69C8E]'}`}>
+                        {modal.blockData.isVat ? '켜짐' : '꺼짐'}
                       </span>
                     </button>
                   </div>
