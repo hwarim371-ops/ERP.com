@@ -92,6 +92,15 @@
       blockColorLabels: normalizeColorLabelMap(settings?.blockColorLabels),
     });
     const getDataFingerprint = (accounts, blockList, settings = {}) => JSON.stringify([accounts || [], blockList || [], normalizeAppSettings(settings)]);
+    const normalizeCloudSnapshotForClient = (snapshot) => ({
+      accountsData: migrateAccountsTerms(Array.isArray(snapshot?.accountsData) ? snapshot.accountsData : []),
+      blocks: Array.isArray(snapshot?.blocks) ? snapshot.blocks.map(migrateLedgerItemTerms) : [],
+      appSettings: normalizeAppSettings(snapshot?.appSettings),
+    });
+    const getCloudSnapshotFingerprint = (snapshot) => {
+      const normalized = normalizeCloudSnapshotForClient(snapshot);
+      return getDataFingerprint(normalized.accountsData, normalized.blocks, normalized.appSettings);
+    };
     const readPendingSave = () => {
       try { return JSON.parse(localStorage.getItem(PENDING_SAVE_KEY) || 'null'); }
       catch (err) { return null; }
@@ -274,6 +283,7 @@
       const [isInitialLoading, setIsInitialLoading] = useState(true);
       const [lastSavedAt, setLastSavedAt] = useState(null);
       const [lastLoadedFingerprint, setLastLoadedFingerprint] = useState('');
+      const [lastLoadedSyncId, setLastLoadedSyncId] = useState('');
       const cloudLoadInFlight = useRef(false);
       const pendingSaveRef = useRef(readPendingSave());
       const boardScrollRef = useRef(null);
@@ -299,7 +309,7 @@
         if (!value) return '저장 기록 없음';
         const date = new Date(value);
         if (Number.isNaN(date.getTime())) return '저장 시간 확인 필요';
-        return `${date.getFullYear()}년 ${twoDigits(date.getMonth() + 1)}월 ${twoDigits(date.getDate())}일 ${twoDigits(date.getHours())}시 ${twoDigits(date.getMinutes())}분 데이터`;
+        return `${date.getFullYear()}년 ${twoDigits(date.getMonth() + 1)}월 ${twoDigits(date.getDate())}일 ${twoDigits(date.getHours())}시 ${twoDigits(date.getMinutes())}분 ${twoDigits(date.getSeconds())}초 데이터`;
       };
 
       const buildCloudUrl = () => `${GAS_URL}${GAS_URL.includes('?') ? '&' : '?'}t=${Date.now()}`;
@@ -398,16 +408,18 @@
           throw new Error("클라우드에 초기 샘플 자료가 저장되어 있습니다. 기존 장부를 보호하기 위해 불러오기를 중단했습니다.");
         }
         backupCloudSnapshot(data);
-        const loadedAccounts = migrateAccountsTerms(data.accountsData);
+        const normalizedSnapshot = normalizeCloudSnapshotForClient(data);
+        const loadedAccounts = normalizedSnapshot.accountsData;
         setAccountsData(loadedAccounts);
-        const loadedAppSettings = normalizeAppSettings(data.appSettings);
+        const loadedAppSettings = normalizedSnapshot.appSettings;
         setAppSettings(loadedAppSettings);
         // ⚠️ 개선: 불러온 데이터에 자동정리(cleanupBlocks)를 적용하지 않고 서버 원본 그대로 표시
         //    (불러오는 순간 항목이 합쳐지거나 삭제되어 내용이 꼬이던 원인 제거)
-        const loadedBlocks = Array.isArray(data.blocks) ? data.blocks.map(migrateLedgerItemTerms) : [];
+        const loadedBlocks = normalizedSnapshot.blocks;
         setBlocks(loadedBlocks);
         setCollapsedSubItems(getCollapsibleBlockIds(loadedBlocks));
         setLastLoadedFingerprint(getDataFingerprint(loadedAccounts, loadedBlocks, loadedAppSettings));
+        setLastLoadedSyncId(String(data.syncId || ''));
         if (data.lastSavedAt) setLastSavedAt(data.lastSavedAt);
         const pending = pendingSaveRef.current;
         if (pending && data.syncId === pending.syncId) clearPendingSave();
@@ -1067,18 +1079,27 @@
 
           const serverSavedAt = latestSnapshot.lastSavedAt || '';
           let screenSavedAt = lastSavedAt || '';
-          const serverFingerprint = getDataFingerprint(latestSnapshot.accountsData, Array.isArray(latestSnapshot.blocks) ? latestSnapshot.blocks : [], latestSnapshot.appSettings || {});
+          const serverFingerprint = getCloudSnapshotFingerprint(latestSnapshot);
           let effectiveLoadedFingerprint = lastLoadedFingerprint;
+          let effectiveLoadedSyncId = lastLoadedSyncId;
           const pendingSave = pendingSaveRef.current;
           const isOwnPendingSave = !!(pendingSave && latestSnapshot.syncId === pendingSave.syncId);
           if (isOwnPendingSave) {
             screenSavedAt = serverSavedAt;
             setLastSavedAt(serverSavedAt);
             setLastLoadedFingerprint(serverFingerprint);
+            setLastLoadedSyncId(String(latestSnapshot.syncId || ''));
             effectiveLoadedFingerprint = serverFingerprint;
+            effectiveLoadedSyncId = String(latestSnapshot.syncId || '');
             clearPendingSave();
           }
-          if (!screenSavedAt || serverSavedAt !== screenSavedAt || (effectiveLoadedFingerprint && serverFingerprint !== effectiveLoadedFingerprint)) {
+          const canCompareSyncVersion = !!(effectiveLoadedSyncId && latestSnapshot.syncId);
+          const serverVersionChanged = canCompareSyncVersion
+            ? String(latestSnapshot.syncId) !== effectiveLoadedSyncId
+            : (!screenSavedAt
+              || serverSavedAt !== screenSavedAt
+              || (effectiveLoadedFingerprint && serverFingerprint !== effectiveLoadedFingerprint));
+          if (serverVersionChanged) {
             backupCloudSnapshot(buildCurrentSnapshot(), 'conflict-detected');
             throw new Error(`다른 기기에서 자료가 변경되었습니다.\n현재 수정본은 이 PC에 자동 백업했으며 서버 자료를 덮어쓰지 않았습니다.\n\n최신 불러오기를 눌러 확인해주세요.\n내 화면: ${formatLastSavedAt(screenSavedAt)}\n서버: ${formatLastSavedAt(serverSavedAt)}`);
           }
@@ -1142,9 +1163,9 @@
           }
 
           const savedSnapshot = verification.snapshot;
-          const savedBlocks = Array.isArray(savedSnapshot.blocks) ? savedSnapshot.blocks : [];
           backupCloudSnapshot(savedSnapshot, 'after-save');
-          setLastLoadedFingerprint(getDataFingerprint(savedSnapshot.accountsData, savedBlocks, savedSnapshot.appSettings || {}));
+          setLastLoadedFingerprint(getCloudSnapshotFingerprint(savedSnapshot));
+          setLastLoadedSyncId(String(savedSnapshot.syncId || syncId));
           setLastSavedAt(savedSnapshot.lastSavedAt || savedAt);
           clearPendingSave();
           openDialog('alert', "클라우드에 저장되었습니다.");
