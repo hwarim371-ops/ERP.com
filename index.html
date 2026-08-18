@@ -503,14 +503,14 @@
       const parseMoneyInput = (value) => parseInt(String(value || '').replace(/[^0-9-]/g, ''), 10) || 0;
       const calculateIncludedVat = (amount) => {
         const numericAmount = Number(amount) || 0;
-        return Math.sign(numericAmount) * Math.round(Math.abs(numericAmount) / 11);
+        return Math.round(Math.abs(numericAmount) / 11);
       };
       const calculateVatAmount = (amount, itemOrMode) => {
         const numericAmount = Number(amount) || 0;
         const mode = typeof itemOrMode === 'string' ? itemOrMode : getStoredVatMode(itemOrMode);
         if (mode === 'included') return calculateIncludedVat(numericAmount);
-        if (mode === 'additional') return Math.sign(numericAmount) * Math.round(Math.abs(numericAmount) * 0.1);
-        if (mode === 'full') return numericAmount;
+        if (mode === 'additional') return Math.round(Math.abs(numericAmount) * 0.1);
+        if (mode === 'full') return Math.abs(numericAmount);
         return 0;
       };
       const getVatBadgeText = (item, amount) => {
